@@ -1,14 +1,12 @@
-def detect_person(frame, model, conf=0.4):
-    results = model(frame, conf=conf)[0]
-    detections = []
+from ultralytics import YOLO
 
-    for box in results.boxes:
-        cls = int(box.cls[0])
-        if cls != 0:
-            continue
+class PersonDetector:
+    def __init__(self, model_path="yolov8n.pt", conf=0.5):
+        self.model = YOLO(model_path)
+        self.conf = conf
 
-        x1, y1, x2, y2 = box.xyxy[0].cpu().numpy()
-        score = box.conf[0].cpu().numpy()
-        detections.append([x1, y1, x2, y2, score])
+    def detect(self, frame):
+        results = self.model(frame, conf=self.conf, classes=[0,24,26,28,43],device=0) 
+        #class 0 = person , 24 = backpack, 26 = handbag, 28 = suitcase , 43 = knife
+        return results[0]
 
-    return detections
