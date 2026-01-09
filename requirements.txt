@@ -1,0 +1,14 @@
+ultralytics
+opencv-python
+numpy
+torch
+torchvision
+torchaudio
+flask
+flask-socketio
+eventlet
+paho-mqtt
+requests
+tqdm
+pandas
+matplotlib
