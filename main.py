@@ -1,34 +1,50 @@
 import cv2
-from ultralytics import YOLO
+import time
+from cameras.camera import Camera
+from ai.detector import PersonDetector
+TARGET_FPS = 15
+FRAME_TIME = 1.0 / TARGET_FPS
+def resize_keep_ratio(frame, target_width=640):
+    h, w = frame.shape[:2]
+    ratio = target_width / w
+    return cv2.resize(frame, (target_width, int(h * ratio)))
 
-# 1) โหลดโมเดล
-model = YOLO("yolov8n.pt")
+# สร้าง detector แค่ครั้งเดียว
+detector = PersonDetector(conf=0.5)
 
-# 2) เปิดวิดีโอ (แทนกล้อง)
-cap = cv2.VideoCapture("videos\\3105196-uhd_3840_2160_30fps.mp4")
+# สร้างกล้อง 2 ตัว
+cam1 = Camera("videos\\853889-hd_1920_1080_25fps.mp4", name="Camera 1")
+cam2 = Camera("videos\\15052703_2560_1440_30fps.mp4", name="Camera 2")
 
-if not cap.isOpened():
-    print("❌ Cannot open video")
-    exit()
-
-# 3) loop อ่าน frame
 while True:
-    ret, frame = cap.read()
-    if not ret:
+    start_time = time.time()
+    # อ่าน frame จากทั้งสองกล้อง
+    ret1, frame1 = cam1.read()
+    ret2, frame2 = cam2.read()
+
+    if not ret1 and not ret2:
         break
-    frame = cv2.resize(frame, (640, 480))
-    # 4) ส่ง frame เข้า YOLO
-    results = model(frame, conf=0.5, classes=[0,24,28,43],device=0)  # class 0 = person , 24 = backpack, 28 = suitcase , 43 = knife
 
-    # 5) วาด bounding box
-    annotated_frame = results[0].plot()
+    # ตรวจจับคน
+    result1 = detector.detect(frame1)
+    result2 = detector.detect(frame2)
 
-    # 6) แสดงผล
-    cv2.imshow("Camera 1 - Person Detection", annotated_frame)
+    # วาดผลลัพธ์
+    view1 = resize_keep_ratio(result1.plot())
+    view2 = resize_keep_ratio(result2.plot())
 
-    # กด q เพื่อออก
+    # แสดงผล
+    cv2.imshow(cam1.name, view1)
+    cv2.imshow(cam2.name, view2)
+
+    # ควบคุม FPS
+    elapsed = time.time() - start_time
+    sleep_time = max(0, FRAME_TIME - elapsed)
+    time.sleep(sleep_time)
+
     if cv2.waitKey(1) & 0xFF == ord('q'):
         break
 
-cap.release()
+cam1.release()
+cam2.release()
 cv2.destroyAllWindows()
