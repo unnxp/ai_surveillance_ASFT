@@ -6,6 +6,7 @@ videos/*
 venv/
 .venv/
 __pycache__/
+env/
 .env
 .env.*
 secrets.*
@@ -29,3 +30,4 @@ datasets/*
 !datasets/.gitkeep
 data/*
 !data/.gitkeep
+KeyWord.txt
