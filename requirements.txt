@@ -12,3 +12,5 @@ requests
 tqdm
 pandas
 matplotlib
+fastapi 
+uvicorn
