@@ -3,7 +3,7 @@ from logic.pir_trigger import PIRTrigger
 
 app = FastAPI(title="PIR Sensor API")
 
-pir = PIRTrigger(active_duration=8)
+pir = PIRTrigger(active_duration=5)  # PIR จะ active นาน 5 วินาทีหลังถูก trigger
 
 @app.post("/pir/trigger")
 def trigger_pir():
