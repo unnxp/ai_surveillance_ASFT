@@ -31,3 +31,5 @@ datasets/*
 data/*
 !data/.gitkeep
 KeyWord.txt
+*.bak
+*.pdf

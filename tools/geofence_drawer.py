@@ -51,8 +51,8 @@ def main():
         print("Error: ไม่สามารถอ่านเฟรมจากวิดีโอได้")
         return
 
-    # ปรับขนาดเฟรมตามความกว้างใช้งานจริงของสตรีมหลัก (640 พิกเซล)
-    DISPLAY_WIDTH = 640
+    # ปรับขนาดเฟรมตามความกว้างใช้งานจริงของสตรีมหลัก (960 พิกเซล เพื่อความละเอียด)
+    DISPLAY_WIDTH = 960
     frame = resize_keep_ratio(frame, DISPLAY_WIDTH)
     h, w = frame.shape[:2]
     

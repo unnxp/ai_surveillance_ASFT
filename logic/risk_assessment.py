@@ -115,17 +115,17 @@ class RiskAssessmentEngine:
         
         return polygons
 
-    def check_geofence_breach(self, camera_name: str, cx: float, cy: float, frame_w: int, frame_h: int) -> tuple[bool, str]:
+    def check_geofence_breach(self, camera_name: str, points_to_check: list[tuple[float, float]], frame_w: int, frame_h: int) -> tuple[bool, str]:
         """
-        ตรวจสอบพิกัดพิกเซลเท้าคน (Bottom-Center) ว่าอยู่ใน Geofence หรือไม่
+        ตรวจสอบลิสต์ของพิกัดพิกเซลต่างๆ (เท้า, เข่า, ลำตัว) ว่ามีจุดใดอยู่ใน Geofence หรือไม่
         """
         polygons = self.get_geofence_polygons(camera_name, frame_w, frame_h)
         for name, poly in polygons:
-            # ใช้ cv2.pointPolygonTest ตรวจจับพิกัด
-            # คืนค่า >= 0 คืออยู่ภายในหรือบนเส้นขอบ
-            dist = cv2.pointPolygonTest(poly, (float(cx), float(cy)), False)
-            if dist >= 0:
-                return True, name
+            # ตรวจสอบจุดทั้งหมดในลิสต์
+            for px, py in points_to_check:
+                dist = cv2.pointPolygonTest(poly, (float(px), float(py)), False)
+                if dist >= 0:
+                    return True, name
         return False, ""
 
     def update_and_assess(
@@ -214,8 +214,14 @@ class RiskAssessmentEngine:
             state = active_states[tid]
             state.last_seen = current_time
 
-            # ── 1. ตรวจสอบการเดินบุกรุก Geofence ─────────────────────────
-            is_breach, zone_name = self.check_geofence_breach(camera_name, p_foot_x, p_foot_y, frame_w, frame_h)
+            # ── 1. ตรวจสอบการเดินบุกรุก Geofence (เช็ค เท้า, เข่า, เอว) ───
+            p_knee_y = (p_cy + p_foot_y) / 2
+            pts_to_check = [
+                (p_foot_x, p_foot_y),  # จุดเท้าล่างสุด
+                (p_cx, p_knee_y),      # จุดระดับเข่า
+                (p_cx, p_cy)           # จุดกึ่งกลางตัว/เอว
+            ]
+            is_breach, zone_name = self.check_geofence_breach(camera_name, pts_to_check, frame_w, frame_h)
             if is_breach:
                 state.is_inside_geofence = True
                 state.geofence_name = zone_name
