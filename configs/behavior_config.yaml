@@ -1,0 +1,35 @@
+off_hours:
+  start: '22:00'
+  end: 06:00
+  debug_always_off_hours: false
+thresholds:
+  loiter_time_seconds: 8.0
+  speed_run_pixels_per_second: 180.0
+  weapon_distance_ratio: 0.3
+geofences:
+  Camera 1 (Always ON):
+  - name: Restricted Entrance
+    polygon:
+    - - 0.3
+      - 0.267
+    - - 0.48
+      - 0.253
+    - - 0.439
+      - 0.942
+    - - 0.291
+      - 0.942
+  Camera 2 (PIR + Self Hold):
+  - name: Private Corridor
+    polygon:
+    - - 0.05
+      - 0.2
+    - - 0.55
+      - 0.2
+    - - 0.55
+      - 0.95
+    - - 0.05
+      - 0.95
+logging:
+  csv_path: data/event_log.csv
+  alerts_dir: data/alerts
+  cooldown_seconds: 10.0
