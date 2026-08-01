@@ -10,18 +10,14 @@ geofences:
   Camera 1 (Always ON):
   - name: Restricted Entrance
     polygon:
-    - - 0.002
-      - 0.93
-    - - 0.536
-      - 0.998
-    - - 0.614
-      - 0.776
-    - - 0.335
-      - 0.685
-    - - 0.268
-      - 0.652
-    - - 0.007
-      - 0.815
+    - - 0.152
+      - 0.607
+    - - 0.085
+      - 0.707
+    - - 0.332
+      - 0.713
+    - - 0.334
+      - 0.609
   Camera 2 (PIR + Self Hold):
   - name: Private Corridor
     polygon:
@@ -37,3 +33,12 @@ logging:
   csv_path: data/event_log.csv
   alerts_dir: data/alerts
   cooldown_seconds: 10.0
+heatmap:
+  enabled: true
+  short_decay: 0.992
+  long_decay: 0.9999
+  radius: 25
+  intensity: 15.0
+  alpha: 0.55
+  warmup_seconds: 120
+  anomaly_threshold: 5.0

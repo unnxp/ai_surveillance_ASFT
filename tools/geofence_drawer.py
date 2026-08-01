@@ -4,6 +4,8 @@ import shutil
 import cv2
 import yaml
 
+os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = "rtsp_transport;tcp"
+
 # ฟังก์ชันปรับขนาดภาพรักษาอัตราส่วน (เหมือนใน main.py)
 def resize_keep_ratio(frame, target_width):
     h, w = frame.shape[:2]
@@ -28,8 +30,8 @@ def main():
     
     if camera_choice in ["1", "cam1", "camera1"]:
         camera_name = "Camera 1 (Always ON)"
-        # video_source = "videos/3105196-uhd_3840_2160_30fps.mp4" # ✅ เก็บไว้สำหรับเปลี่ยนกลับมาทดสอบ
-        video_source = "rtsp://admin:password@192.168.1.100:554/stream1"
+        video_source = r"C:\Users\M S I\Desktop\project_main\ai_surveillance\videos\3318088_hd_1920_1080_25fps.mp4" # ✅ เก็บไว้สำหรับเปลี่ยนกลับมาทดสอบ
+        # video_source = "rtsp://admin:password@192.168.1.100:554/stream1"
     elif camera_choice in ["2", "cam2", "camera2"]:
         camera_name = "Camera 2 (PIR + Self Hold)"
         video_source = r"C:\Users\M S I\Desktop\project_main\ai_surveillance\videos\test_for_cam2.mp4"

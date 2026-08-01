@@ -199,7 +199,11 @@ def build_pdf(filename="Project_Details_Surveillance.pdf"):
          
         [Paragraph("<b>Behavior Recognition</b>", body_style), 
          Paragraph("YOLOv8-Pose + LSTM", body_style), 
-         Paragraph("วิเคราะห์คีย์พอยท์ข้อต่อร่างกายเพื่อจำแนกพฤติกรรมเสี่ยง เช่น การวิ่งหรือการสอดส่อง", body_style)],
+         Paragraph("วิเคราะห์คีย์พอยท์ข้อต่อร่างกายเพื่อจำแนกพฤติกรรมเสี่ยง เช่น การเดิน วิ่ง หรือท่าทางพิรุธ", body_style)],
+         
+        [Paragraph("<b>Risk Assessment (AI)</b>", body_style), 
+         Paragraph("PyTorch MLP (Neural Network)", body_style), 
+         Paragraph("ประเมินและจำแนกความเสี่ยง 4 ระดับแบบเรียลไทม์ พร้อมแสดงค่าความมั่นใจ (%) โดยใช้โครงข่ายประสาทเทียม", body_style)],
          
         [Paragraph("<b>Weapon Detection</b>", body_style), 
          Paragraph("YOLOv8n (Custom Train)", body_style), 
@@ -207,7 +211,7 @@ def build_pdf(filename="Project_Details_Surveillance.pdf"):
          
         [Paragraph("<b>Image Processing</b>", body_style), 
          Paragraph("OpenCV", body_style), 
-         Paragraph("จัดการฟีดภาพสดจากกล้อง, ย่อภาพ, วาด Graphic Overlay แจ้งเตือน", body_style)]
+         Paragraph("จัดการฟีดภาพสดจากกล้อง, ย่อภาพ, วาด Graphic Overlay แจ้งเตือนพร้อมสัญลักษณ์แจ้งเตือนแบบกระพริบ", body_style)]
     ]
     
     tech_table = Table(tech_data, colWidths=[110, 160, 250])
@@ -231,7 +235,7 @@ def build_pdf(filename="Project_Details_Surveillance.pdf"):
     
     adv_features = [
         "<b>Time-Based Geofencing (การจำกัดพื้นที่ตามเวลา):</b> กำหนดเขตพื้นที่เสี่ยงที่แปรผันตามเวลา เช่น ประตูหลังอาคารในเวลาทำการความเสี่ยงปกติ (LOW) แต่หากล้ำเส้นหลังเวลา 22:00 น. จะปรับระดับเป็นวิกฤต (CRITICAL) ทันที",
-        "<b>Sequential Risk State Machine (สถานะความเสี่ยงสะสม):</b> ป้องกันการแจ้งเตือนผิดพลาดโดยคิดคะแนนสะสมเชิงพฤติกรรมต่อเนื่อง เช่น ยืนนิ่งนานผิดปกติ ➡️ เริ่มเคลื่อนที่เร็วขึ้น ➡️ หยิบวัตถุต้องสงสัย",
+        "<b>Hybrid AI Risk Classification (โครงข่ายประสาทเทียมประเมินความเสี่ยง):</b> ใช้โครงข่ายประสาทเทียม PyTorch MLP วิเคราะห์และทำนายระดับความเสี่ยง 4 ระดับ โดยรับเวกเตอร์ฟีเจอร์พฤติกรรม ทิศทางการเคลื่อนไหว ความเร่ง การถือวัตถุ และการจำแนกท่าทาง (Action Class) ทำให้คำนวณระดับความเสี่ยงและค่าความมั่นใจ (%) แบบไดนามิกได้อย่างแม่นยำ แทนการใช้กฎเงื่อนไขแบบเดิม",
         "<b>Heatmap & Path Outliers:</b> วาดแผนที่สะสมความหนาแน่นการใช้งานพื้นที่ของมนุษย์ เพื่อชี้วัดและแจ้งเตือนทันทีเมื่อมีคนเดินผ่านมุมอับหรือจุดต้องห้ามที่ปกติไม่มีคนผ่านเลย"
     ]
     for feat in adv_features:
@@ -247,11 +251,11 @@ def build_pdf(filename="Project_Details_Surveillance.pdf"):
         
         [Paragraph("Kalman Trajectory & Prediction", body_style), Paragraph("ติดตามพิกัด ลดสัญญาณรบกวนของเส้นวิถี และทำนายทิศทางล่วงหน้า", body_style), Paragraph("<font color='#38A169'><b>เสร็จสิ้น (Done)</b></font>", body_style)],
          
-        [Paragraph("Advanced Risk Assessment Engine", body_style), Paragraph("ประเมินความเสี่ยงด้วย Rule-based + Geofencing + Time Rule + Heuristic Behavior", body_style), Paragraph("<font color='#DD6B20'><b>กำลังดำเนินการ (In Progress)</b></font>", body_style)],
+        [Paragraph("AI Risk Assessment Engine (MLP)", body_style), Paragraph("ประเมินความเสี่ยงและทำนายผลด้วยโครงข่ายประสาทเทียม PyTorch MLP (LOW/MEDIUM/HIGH/CRITICAL)", body_style), Paragraph("<font color='#38A169'><b>เสร็จสิ้น (Done)</b></font>", body_style)],
          
-        [Paragraph("Event Logging & Screen Capture", body_style), Paragraph("บันทึกตารางเหตุการณ์ลง CSV พร้อมจับภาพสกรีนช็อคช่วงเกิดเหตุลงโฟลเดอร์", body_style), Paragraph("<font color='#DD6B20'><b>กำลังดำเนินการ (In Progress)</b></font>", body_style)],
+        [Paragraph("Event Logging & Screen Capture", body_style), Paragraph("บันทึกตารางเหตุการณ์ลง CSV พร้อมจับภาพสกรีนช็อตช่วงเกิดเหตุลงโฟลเดอร์", body_style), Paragraph("<font color='#38A169'><b>เสร็จสิ้น (Done)</b></font>", body_style)],
          
-        [Paragraph("Cross-Camera Re-ID / Heatmap Overlay", body_style), Paragraph("วาด Heatmap บนฟีดวิดีโอ และเก็บประวัติผู้ใช้ข้ามกล้อง", body_style), Paragraph("<font color='#E53E3E'><b>รอดำเนินการ (To Do)</b></font>", body_style)]
+        [Paragraph("Hybrid AI Action Recognition", body_style), Paragraph("สกัดคีย์พอยท์กระดูกและจำแนกท่าทางละเอียดด้วย YOLOv8-Pose + LSTM", body_style), Paragraph("<font color='#DD6B20'><b>กำลังดำเนินการ (In Progress)</b></font>", body_style)]
     ]
     
     checklist_table = Table(checklist_data, colWidths=[150, 250, 120])

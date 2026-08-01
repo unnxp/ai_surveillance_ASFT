@@ -5,6 +5,11 @@ import time
 import cv2
 import numpy as np
 
+from logic.heatmap import HeatmapManager
+import torch
+from logic.risk_model import RiskMLP
+
+
 class RiskState:
     """
     คลาสเก็บสถานะความเสี่ยงและพฤติกรรมสะสมสำหรับแต่ละ Track ID
@@ -12,6 +17,7 @@ class RiskState:
     def __init__(self, track_id: int):
         self.track_id = track_id
         self.current_level = "LOW"  # LOW, MEDIUM, HIGH, CRITICAL
+        self.confidence = 1.0       # ความมั่นใจของการประเมินของ AI (0.0 - 1.0)
         self.first_seen = time.time()
         self.last_seen = time.time()
         
@@ -21,6 +27,7 @@ class RiskState:
         self.loitering_detected = False
         self.run_detected = False
         self.weapon_detected = False
+        self.path_anomaly_detected = False
         self.trigger_reasons = []
         
         # สำหรับควบคุมการแจ้งเตือนและการบันทึกซ้ำ
@@ -34,6 +41,8 @@ class RiskState:
         self.loitering_detected = False
         self.run_detected = False
         self.weapon_detected = False
+        self.path_anomaly_detected = False
+
 
     def add_trigger(self, reason: str):
         if reason not in self.trigger_reasons:
@@ -52,6 +61,33 @@ class RiskAssessmentEngine:
         # เก็บสถานะความเสี่ยงแยกตามกล้องและ track_id: {camera_name: {track_id: RiskState}}
         self.camera_states = {}
         self.max_age = 5.0  # ลบข้อมูลสะสมหากคนหายไปเกิน 5 วินาที
+        
+        # เริ่มใช้งานโมดูล Heatmap
+        self.heatmap_manager = HeatmapManager(self.config)
+        
+        # โหลดโมเดลโครงข่ายประสาทเทียมประเมินความเสี่ยง (PyTorch MLP)
+        self.risk_model = None
+        self.model_meta = None
+        self.load_risk_model()
+
+    def load_risk_model(self):
+        model_path = "models/risk_classifier.pth"
+        meta_path = "models/risk_model_meta.yaml"
+        if os.path.exists(model_path) and os.path.exists(meta_path):
+            try:
+                with open(meta_path, "r", encoding="utf-8") as f:
+                    self.model_meta = yaml.safe_load(f)
+                
+                self.risk_model = RiskMLP(input_dim=6, num_classes=4)
+                self.risk_model.load_state_dict(torch.load(model_path, map_location=torch.device('cpu')))
+                self.risk_model.eval()
+                print(f"[RiskAssessmentEngine] Successfully loaded PyTorch Risk Classifier from {model_path}")
+            except Exception as e:
+                print(f"[RiskAssessmentEngine] Error loading PyTorch model: {e}. Falling back to Rule-based.")
+                self.risk_model = None
+        else:
+            print("[RiskAssessmentEngine] PyTorch weight or metadata files not found. Using Rule-based Fallback.")
+
 
     def load_config(self):
         if os.path.exists(self.config_path):
@@ -145,10 +181,17 @@ class RiskAssessmentEngine:
             self.camera_states[camera_name] = {}
         
         active_states = self.camera_states[camera_name]
+
+        # ✅ อัปเดตข้อมูลสะสมความร้อน (Heatmap) ของคาบเวลานี้
+        is_off_hours_active = self.is_off_hours()
+        self.heatmap_manager.update(
+            camera_name, result, scale, frame_w, frame_h, is_off_hours_active, current_time
+        )
         
         # เคลียร์ข้อมูลทริกเกอร์ของเฟรมใหม่สำหรับทุก track
         for state in active_states.values():
             state.reset_triggers()
+
 
         if result is None or result.boxes is None:
             self._cleanup_stale_tracks(camera_name, current_time)
@@ -258,23 +301,64 @@ class RiskAssessmentEngine:
                     state.add_trigger("Weapon (Knife) Detected")
                     break  # เจอชิ้นเดียวก็ทริกเกอร์เลย
 
-            # ── 5. ตัดสินใจระดับความเสี่ยง (Sequential State Machine) ──
-            # กำหนดลำดับขั้นความเสี่ยง (Heuristic Logic)
-            if state.weapon_detected:
-                state.current_level = "CRITICAL"
-            elif state.is_inside_geofence and is_off_hours_active:
-                state.current_level = "CRITICAL"
-                state.add_trigger("Off-Hours Breach")
-            elif state.is_inside_geofence and (state.run_detected or state.loitering_detected):
-                state.current_level = "HIGH"
-            elif state.is_inside_geofence:
-                state.current_level = "HIGH"  # ปรับเพิ่มขึ้นหากมีการบุกรุกพื้นที่
-            elif state.run_detected and state.loitering_detected:
-                state.current_level = "HIGH"
-            elif state.run_detected or state.loitering_detected:
-                state.current_level = "MEDIUM"
+            # ── 4.5. ตรวจสอบการเดินในเส้นทางแปลกปลอม (Path Anomaly) ───────
+            is_anomaly = self.heatmap_manager.check_path_anomaly(
+                camera_name, p_cx, p_foot_y, is_off_hours_active, current_time
+            )
+            if is_anomaly:
+                state.path_anomaly_detected = True
+                state.add_trigger("Unusual Path Entry")
+
+            # ── 5. ตัดสินใจระดับความเสี่ยง (Sequential State Machine หรือ PyTorch MLP) ──
+            if self.risk_model is not None and self.model_meta is not None:
+                # ── 5.1. การใช้โครงข่ายประสาทเทียม PyTorch MLP ในการทำนาย ──
+                f_geofence = 1.0 if state.is_inside_geofence else 0.0
+                f_off_hours = 1.0 if is_off_hours_active else 0.0
+                
+                # ทำ Normalization/Scaling ฟีเจอร์ต่อเนื่องตาม Metadata ที่เซฟไว้
+                norm_cfg = self.model_meta.get("normalization", {})
+                loiter_cap = norm_cfg.get("loiter_cap_seconds", 30.0)
+                speed_cap = norm_cfg.get("speed_cap_px_per_sec", 500.0)
+                
+                f_loitering = min(total_duration, loiter_cap) / loiter_cap
+                f_speed = min(speed, speed_cap) / speed_cap
+                f_weapon = 1.0 if state.weapon_detected else 0.0
+                f_anomaly = 1.0 if state.path_anomaly_detected else 0.0
+                
+                # สร้าง Tensor ขนาด [1, 6]
+                features = [f_geofence, f_off_hours, f_loitering, f_speed, f_weapon, f_anomaly]
+                features_tensor = torch.tensor([features], dtype=torch.float32)
+                
+                # รัน Forward pass
+                with torch.no_grad():
+                    logits = self.risk_model(features_tensor)
+                    probabilities = torch.softmax(logits, dim=1)[0]
+                    predicted_class = probabilities.argmax().item()
+                    confidence = probabilities[predicted_class].item()
+                
+                # แผนผังคลาส: 0: LOW, 1: MEDIUM, 2: HIGH, 3: CRITICAL
+                class_mapping = self.model_meta.get("class_mapping", {0: "LOW", 1: "MEDIUM", 2: "HIGH", 3: "CRITICAL"})
+                state.current_level = class_mapping.get(predicted_class, "LOW")
+                state.confidence = confidence
             else:
-                state.current_level = "LOW"
+                # ── 5.2. Heuristic Logic Fallback (เมื่อไม่ได้รันเทรนโมเดล) ──
+                state.confidence = 1.0
+                if state.weapon_detected:
+                    state.current_level = "CRITICAL"
+                elif state.is_inside_geofence and is_off_hours_active:
+                    state.current_level = "CRITICAL"
+                    state.add_trigger("Off-Hours Breach")
+                elif state.is_inside_geofence and (state.run_detected or state.loitering_detected or state.path_anomaly_detected):
+                    state.current_level = "HIGH"
+                elif state.is_inside_geofence:
+                    state.current_level = "HIGH"
+                elif state.run_detected and state.loitering_detected:
+                    state.current_level = "HIGH"
+                elif state.run_detected or state.loitering_detected or state.path_anomaly_detected:
+                    state.current_level = "MEDIUM"
+                else:
+                    state.current_level = "LOW"
+
 
         self._cleanup_stale_tracks(camera_name, current_time)
         return active_states

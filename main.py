@@ -189,8 +189,13 @@ while True:
         risk_states1 = risk_engine.update_and_assess(
             cam1.name, result1, speeds1, scale_cam1, w1, h1, now
         )
+        
+        # ✅ แสดงผลแผนภาพความร้อนสะสม (ก่อนวาดขอบความเสี่ยงและกล่อง Geofence)
+        view1 = risk_engine.heatmap_manager.apply_overlay(cam1.name, view1, risk_engine.is_off_hours())
+        
         risk_engine.draw_geofence(view1, cam1.name)
         risk_engine.draw_risk_overlay(view1, result1, scale_cam1, risk_states1)
+
         
         # ✅ ทริกเกอร์แจ้งเตือน/บันทึกผล
         alert_manager.check_and_trigger_alert(cam1.name, view1, risk_states1, now)
@@ -205,6 +210,13 @@ while True:
 
         draw_label(view1, "ACTIVE", (0, 255, 0))
         draw_fps(view1, fps_display, traj_cam1.active_count())
+        
+        # แสดงสถานะโหมด Heatmap
+        hm_mode = risk_engine.heatmap_manager.get_display_mode_str()
+        if hm_mode != "OFF":
+            cv2.putText(view1, f"HEATMAP: {hm_mode}", (20, 135),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 165, 255), 2)
+
     else:
         view1 = blank_frame(text="CAMERA 1 OFFLINE")
 
@@ -235,8 +247,13 @@ while True:
             risk_states2 = risk_engine.update_and_assess(
                 cam2.name, result2, speeds2, scale_cam2, w2, h2, now
             )
+            
+            # ✅ แสดงผลแผนภาพความร้อนสะสม
+            view2 = risk_engine.heatmap_manager.apply_overlay(cam2.name, view2, risk_engine.is_off_hours())
+            
             risk_engine.draw_geofence(view2, cam2.name)
             risk_engine.draw_risk_overlay(view2, result2, scale_cam2, risk_states2)
+
             
             # ✅ ทริกเกอร์แจ้งเตือน/บันทึกผล
             alert_manager.check_and_trigger_alert(cam2.name, view2, risk_states2, now)
@@ -251,28 +268,61 @@ while True:
 
             draw_label(view2, "ACTIVE", (0, 255, 0))
             draw_fps(view2, fps_display, traj_cam2.active_count())
+            
+            # แสดงสถานะโหมด Heatmap
+            hm_mode = risk_engine.heatmap_manager.get_display_mode_str()
+            if hm_mode != "OFF":
+                cv2.putText(view2, f"HEATMAP: {hm_mode}", (20, 135),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 165, 255), 2)
+
         else:
             cam2_open = False
             traj_cam2.reset()
             view2 = resize_keep_ratio(frame2, DISPLAY_WIDTH)
+            
+            # ✅ แสดงผลแผนภาพความร้อนสะสมบนฟีด Standby (ไม่มีตำแหน่งอัปเดตใหม่แต่โชว์ข้อมูลเก่าได้)
+            view2 = risk_engine.heatmap_manager.apply_overlay(cam2.name, view2, risk_engine.is_off_hours())
+            
             # วาด geofence บน standby feed
             risk_engine.draw_geofence(view2, cam2.name)
             draw_label(view2, "STANDBY", (0, 165, 255))
             draw_fps(view2, fps_display)
+            
+            # แสดงสถานะโหมด Heatmap
+            hm_mode = risk_engine.heatmap_manager.get_display_mode_str()
+            if hm_mode != "OFF":
+                cv2.putText(view2, f"HEATMAP: {hm_mode}", (20, 135),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 165, 255), 2)
     else:
         view2 = resize_keep_ratio(frame2, DISPLAY_WIDTH)
+        
+        # ✅ แสดงผลแผนภาพความร้อนสะสมบนฟีด Standby
+        view2 = risk_engine.heatmap_manager.apply_overlay(cam2.name, view2, risk_engine.is_off_hours())
+        
         # วาด geofence บน standby feed
         risk_engine.draw_geofence(view2, cam2.name)
         draw_label(view2, "STANDBY", (0, 165, 255))
         draw_fps(view2, fps_display)
+        
+        # แสดงสถานะโหมด Heatmap
+        hm_mode = risk_engine.heatmap_manager.get_display_mode_str()
+        if hm_mode != "OFF":
+            cv2.putText(view2, f"HEATMAP: {hm_mode}", (20, 135),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 165, 255), 2)
+
 
     cv2.imshow(cam2.name, view2)
 
-    # ════════ EXIT ════════════════════════════════
+    # ════════ EXIT / KEYBOARD EVENTS ══════════════
     elapsed = time.time() - loop_start
     wait_ms = max(1, int((FRAME_TIME - elapsed) * 1000))
-    if cv2.waitKey(wait_ms) & 0xFF == ord('q'):
+    key = cv2.waitKey(wait_ms) & 0xFF
+    if key == ord('q'):
         break
+    elif key == ord('h'):
+        new_mode = risk_engine.heatmap_manager.toggle_mode()
+        print(f"[UI] Heatmap mode toggled to: {new_mode}")
+
 
 # ════════════════════════════════════════════════
 #  CLEANUP

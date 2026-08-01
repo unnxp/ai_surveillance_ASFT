@@ -33,3 +33,12 @@ data/*
 KeyWord.txt
 *.bak
 *.pdf
+Prime_image.jpg
+antigravity_log.md
+.agents/
+*.skill
+etc/*.skill
+tempCodeRunnerFile.py
+etc/tempCodeRunnerFile.py
+test.py
+etc/test.py
