@@ -149,3 +149,40 @@ class GlobalPersonSessionSummary(ContractModel):
     association_status: Literal["matched", "possible_match", "ambiguous", "unknown"]
     last_similarity: float | None = Field(default=None, ge=-1.0, le=1.0, allow_inf_nan=False)
     observation_count: NonNegativeInt = 0
+
+
+class TrackletSummary(ContractModel):
+    """Appearance summary of one local track; sent when ready and again when the track ends."""
+
+    camera_id: NonBlankString
+    gateway_boot_id: NonBlankString
+    local_track_id: NonNegativeInt
+    phase: Literal["ready", "end"]
+    first_seen_utc: UtcDatetime
+    last_seen_utc: UtcDatetime
+    sample_count: Annotated[int, Field(ge=1, le=64)]
+    model_version: NonBlankString
+    appearance: list[float] = Field(min_length=64, max_length=2048)
+
+    @field_validator("appearance")
+    @classmethod
+    def finite_normalized(cls, vector: list[float]) -> list[float]:
+        if not all(isfinite(value) for value in vector):
+            raise ValueError("Appearance vector must be finite")
+        norm = sqrt(sum(value * value for value in vector))
+        if not 0.98 <= norm <= 1.02:
+            raise ValueError("Appearance vector must be L2-normalized")
+        return vector
+
+    @model_validator(mode="after")
+    def ordered_times(self):
+        if self.last_seen_utc < self.first_seen_utc:
+            raise ValueError("Tracklet cannot end before it starts")
+        return self
+
+
+class TrackletAck(ContractModel):
+    global_person_id: NonBlankString
+    association_status: Literal["matched", "possible_match", "ambiguous", "unknown"]
+    cross_camera_handoff: bool
+    appearance_similarity: float | None = Field(default=None, ge=-1.0, le=1.0, allow_inf_nan=False)

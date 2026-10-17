@@ -20,6 +20,8 @@ from common.identity_schemas import (
     GlobalPersonSessionSummary,
     TopologyConfig,
     TopologyEdge,
+    TrackletAck,
+    TrackletSummary,
 )
 from common.schemas import (
     AlertPolicyConfig,
@@ -69,7 +71,8 @@ def create_app(database_path: str | Path | None = None) -> FastAPI:
             attrs = dict(event.attributes)
             person_id = attrs.get("person_id")
             display_name = attrs.get("display_name")
-            face_sim = attrs.get("similarity")
+            # The edge face pipeline reports "face_similarity"; "similarity" is the legacy key.
+            face_sim = attrs.get("face_similarity", attrs.get("similarity"))
             if face_sim is not None:
                 try:
                     face_sim = float(face_sim)
@@ -84,6 +87,7 @@ def create_app(database_path: str | Path | None = None) -> FastAPI:
                 display_name=display_name,
                 face_similarity=face_sim,
                 event_id=event.event_id,
+                gateway_boot_id=event.gateway_boot_id,
             )
             if not event.global_person_id:
                 event = event.model_copy(update={"global_person_id": gid})
@@ -247,6 +251,11 @@ def create_app(database_path: str | Path | None = None) -> FastAPI:
             raise HTTPException(status_code=422, detail="Invalid topology configuration") from error
         saved = database.set_topology_edges(config.edges)
         return {"edges": saved}
+
+    @application.post("/api/v1/tracklets", response_model=TrackletAck)
+    def ingest_tracklet(tracklet: TrackletSummary) -> TrackletAck:
+        """Appearance-only association input; never creates alerts and is never stored."""
+        return association_engine.correlate_tracklet(tracklet)
 
     @application.get("/api/v1/global-person-sessions")
     def list_global_person_sessions(status: str | None = None) -> dict:

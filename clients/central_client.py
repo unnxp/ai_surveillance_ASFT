@@ -5,7 +5,7 @@ import math
 from typing import TYPE_CHECKING, Any, Protocol
 from uuid import UUID
 
-from common.identity_schemas import FaceMatchRequest, FaceMatchResult
+from common.identity_schemas import FaceMatchRequest, FaceMatchResult, TrackletAck, TrackletSummary
 from common.schemas import (
     CameraHeartbeat,
     EventCandidate,
@@ -129,3 +129,12 @@ class CentralClient:
             return result
         except Exception:
             raise CentralProtocolError('Central face match failed') from None
+
+    def send_tracklet(self, tracklet: TrackletSummary) -> TrackletAck:
+        try:
+            response = self.transport.post('/api/v1/tracklets', tracklet.model_dump(mode='json'))
+            if response.status_code != 200:
+                raise CentralProtocolError('Central tracklet status rejected')
+            return TrackletAck.model_validate(response.json())
+        except Exception:
+            raise CentralProtocolError('Central tracklet association failed') from None
