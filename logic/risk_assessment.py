@@ -6,8 +6,6 @@ import cv2
 import numpy as np
 
 from logic.heatmap import HeatmapManager
-import torch
-from logic.risk_model import RiskMLP
 
 
 class RiskState:
@@ -16,11 +14,27 @@ class RiskState:
     """
     def __init__(self, track_id: int):
         self.track_id = track_id
+        self.bbox = []              # [x1, y1, x2, y2]
         self.current_level = "LOW"  # LOW, MEDIUM, HIGH, CRITICAL
         self.confidence = 1.0       # ความมั่นใจของการประเมินของ AI (0.0 - 1.0)
         self.first_seen = time.time()
         self.last_seen = time.time()
         
+        # ข้อมูลการระบุตัวตนด้วยใบหน้า (Face Recognition / Access Control)
+        self.face_id = "Unknown"    # e.g., "Prime", "Stranger", "Unknown"
+        self.face_score = 0.0
+        self.is_authorized = False
+        self.face_vector = None     # 512-dim embedding, nullable
+        self.last_face_check = 0.0
+        self.face_scan_attempts = 0 # จำนวนครั้งที่สแกนแล้ว (Max 3)
+        self.face_locked = False    # ล็อคค่าเมื่อได้ภาพชัด score >= 0.75 หรือครบ 3 ครั้ง
+
+        # ข้อมูลการจำแนกพฤติกรรม (Action Classification)
+        self.action_class = 0       # 0=Normal, 1=Property_Crime, 2=Personal_Violence
+        self.action_name = "Normal"
+        self.action_confidence = 0.0
+        self.last_action_check = 0.0
+
         # รายละเอียดเงื่อนไขพฤติกรรม
         self.is_inside_geofence = False
         self.geofence_name = ""
@@ -64,29 +78,6 @@ class RiskAssessmentEngine:
         
         # เริ่มใช้งานโมดูล Heatmap
         self.heatmap_manager = HeatmapManager(self.config)
-        
-        # โหลดโมเดลโครงข่ายประสาทเทียมประเมินความเสี่ยง (PyTorch MLP)
-        self.risk_model = None
-        self.model_meta = None
-        self.load_risk_model()
-
-    def load_risk_model(self):
-        model_path = "models/risk_classifier.pth"
-        meta_path = "models/risk_model_meta.yaml"
-        if os.path.exists(model_path) and os.path.exists(meta_path):
-            try:
-                with open(meta_path, "r", encoding="utf-8") as f:
-                    self.model_meta = yaml.safe_load(f)
-                
-                self.risk_model = RiskMLP(input_dim=6, num_classes=4)
-                self.risk_model.load_state_dict(torch.load(model_path, map_location=torch.device('cpu')))
-                self.risk_model.eval()
-                print(f"[RiskAssessmentEngine] Successfully loaded PyTorch Risk Classifier from {model_path}")
-            except Exception as e:
-                print(f"[RiskAssessmentEngine] Error loading PyTorch model: {e}. Falling back to Rule-based.")
-                self.risk_model = None
-        else:
-            print("[RiskAssessmentEngine] PyTorch weight or metadata files not found. Using Rule-based Fallback.")
 
 
     def load_config(self):
@@ -168,12 +159,18 @@ class RiskAssessmentEngine:
         self,
         camera_name: str,
         result,
-        speeds: dict[int, float],
-        scale: float,
-        frame_w: int,
-        frame_h: int,
-        current_time: float
+        speeds: dict[int, float] | None = None,
+        scale: float = 1.0,
+        frame_w: int = 640,
+        frame_h: int = 480,
+        current_time: float = 0.0,
+        face_manager=None,
+        action_manager=None,
+        raw_frame=None,
+        check_interval: float = 1.0
     ) -> dict[int, RiskState]:
+        if speeds is None:
+            speeds = {}
         """
         ประเมินความเสี่ยงและพฤติกรรมของทุก Detections/Tracks ในแต่ละเฟรมภาพ
         """
@@ -230,6 +227,7 @@ class RiskAssessmentEngine:
         weapon_dist_ratio = thresholds.get("weapon_distance_ratio", 0.3)
 
         is_off_hours_active = self.is_off_hours()
+        faces_processed_this_frame = 0
 
         # วนรอบคนแต่ละคนเพื่อคำนวณและประเมิน
         for person in person_detections:
@@ -256,6 +254,54 @@ class RiskAssessmentEngine:
             
             state = active_states[tid]
             state.last_seen = current_time
+            state.bbox = [int(px1), int(py1), int(px2), int(py2)]
+
+            # ── 0. Periodic Face Feature Extraction (Smart Multi-Attempt & Batch Spreading) ────────────
+            if face_manager is not None and raw_frame is not None:
+                if not state.face_locked and state.face_scan_attempts < 3 and faces_processed_this_frame < 1:
+                    if (current_time - state.last_face_check >= check_interval):
+                        state.last_face_check = current_time
+                        h_raw, w_raw = raw_frame.shape[:2]
+                        cx1 = max(0, int(px1))
+                        cy1 = max(0, int(py1))
+                        cx2 = min(w_raw, int(px2))
+                        cy2 = min(h_raw, int(py2))
+                        
+                        if cx2 > cx1 and cy2 > cy1:
+                            crop_bgr = raw_frame[cy1:cy2, cx1:cx2]
+                            faces_processed_this_frame += 1
+                            state.face_scan_attempts += 1
+                            
+                            if hasattr(face_manager, "extract_face_embedding"):
+                                emb, score = face_manager.extract_face_embedding(crop_bgr)
+                            else:
+                                _, score, _, emb = face_manager.recognize_face_in_crop(crop_bgr)
+                            
+                            if emb is not None:
+                                state.face_vector = emb
+                                state.face_score = score
+                                state.face_id = "Scanned"
+                                # ล็อคค่าหยุดสแกนเมื่อได้ภาพชัด score >= 0.75 หรือสแกนครบ 3 ครั้งแล้ว
+                                if score >= 0.75 or state.face_scan_attempts >= 3:
+                                    state.face_locked = True
+                            else:
+                                # สแกนไม่พบใบหน้า (หันหลัง/มุมไกล) เว้นระยะ cooldown 3.0s
+                                state.last_face_check = current_time + 2.0
+
+            # ── 0.5. Periodic Action Classification ─────────────────────
+            if action_manager is not None and raw_frame is not None:
+                h_raw, w_raw = raw_frame.shape[:2]
+                cx1 = max(0, int(px1))
+                cy1 = max(0, int(py1))
+                cx2 = min(w_raw, int(px2))
+                cy2 = min(h_raw, int(py2))
+                
+                if cx2 > cx1 and cy2 > cy1:
+                    crop_bgr = raw_frame[cy1:cy2, cx1:cx2]
+                    ac_id, ac_name, ac_conf = action_manager.update_and_classify(tid, crop_bgr, current_time)
+                    state.action_class = ac_id
+                    state.action_name = ac_name
+                    state.action_confidence = ac_conf
 
             # ── 1. ตรวจสอบการเดินบุกรุก Geofence (เช็ค เท้า, เข่า, เอว) ───
             p_knee_y = (p_cy + p_foot_y) / 2
@@ -309,58 +355,48 @@ class RiskAssessmentEngine:
                 state.path_anomaly_detected = True
                 state.add_trigger("Unusual Path Entry")
 
-            # ── 5. ตัดสินใจระดับความเสี่ยง (Sequential State Machine หรือ PyTorch MLP) ──
-            if self.risk_model is not None and self.model_meta is not None:
-                # ── 5.1. การใช้โครงข่ายประสาทเทียม PyTorch MLP ในการทำนาย ──
-                f_geofence = 1.0 if state.is_inside_geofence else 0.0
-                f_off_hours = 1.0 if is_off_hours_active else 0.0
-                
-                # ทำ Normalization/Scaling ฟีเจอร์ต่อเนื่องตาม Metadata ที่เซฟไว้
-                norm_cfg = self.model_meta.get("normalization", {})
-                loiter_cap = norm_cfg.get("loiter_cap_seconds", 30.0)
-                speed_cap = norm_cfg.get("speed_cap_px_per_sec", 500.0)
-                
-                f_loitering = min(total_duration, loiter_cap) / loiter_cap
-                f_speed = min(speed, speed_cap) / speed_cap
-                f_weapon = 1.0 if state.weapon_detected else 0.0
-                f_anomaly = 1.0 if state.path_anomaly_detected else 0.0
-                
-                # สร้าง Tensor ขนาด [1, 6]
-                features = [f_geofence, f_off_hours, f_loitering, f_speed, f_weapon, f_anomaly]
-                features_tensor = torch.tensor([features], dtype=torch.float32)
-                
-                # รัน Forward pass
-                with torch.no_grad():
-                    logits = self.risk_model(features_tensor)
-                    probabilities = torch.softmax(logits, dim=1)[0]
-                    predicted_class = probabilities.argmax().item()
-                    confidence = probabilities[predicted_class].item()
-                
-                # แผนผังคลาส: 0: LOW, 1: MEDIUM, 2: HIGH, 3: CRITICAL
-                class_mapping = self.model_meta.get("class_mapping", {0: "LOW", 1: "MEDIUM", 2: "HIGH", 3: "CRITICAL"})
-                state.current_level = class_mapping.get(predicted_class, "LOW")
-                state.confidence = confidence
-            else:
-                # ── 5.2. Heuristic Logic Fallback (เมื่อไม่ได้รันเทรนโมเดล) ──
-                state.confidence = 1.0
-                if state.weapon_detected:
-                    state.current_level = "CRITICAL"
-                elif state.is_inside_geofence and is_off_hours_active:
-                    state.current_level = "CRITICAL"
-                    state.add_trigger("Off-Hours Breach")
-                elif state.is_inside_geofence and (state.run_detected or state.loitering_detected or state.path_anomaly_detected):
+            # ── 4.6. ตรวจสอบพฤติกรรมผิดปกติจาก Action Classifier ─────────
+            if state.action_class == 2 and state.action_confidence >= 0.70:
+                state.add_trigger(f"Personal Violence ({state.action_confidence*100:.0f}%)")
+            elif state.action_class == 1 and state.action_confidence >= 0.70:
+                state.add_trigger(f"Property Crime ({state.action_confidence*100:.0f}%)")
+
+            # ── 5. ตัดสินใจระดับความเสี่ยง (Heuristic Rule-Based + Access Control) ─
+            state.confidence = 1.0
+            if state.is_authorized:
+                state.add_trigger(f"Authorized ({state.face_id})")
+            elif state.face_id == "Stranger":
+                state.add_trigger("Stranger")
+
+            if state.weapon_detected or (state.action_class == 2 and state.action_confidence >= 0.70):
+                state.current_level = "CRITICAL"
+            elif state.is_inside_geofence and is_off_hours_active:
+                if state.is_authorized:
                     state.current_level = "HIGH"
-                elif state.is_inside_geofence:
-                    state.current_level = "HIGH"
-                elif state.run_detected and state.loitering_detected:
-                    state.current_level = "HIGH"
-                elif state.run_detected or state.loitering_detected or state.path_anomaly_detected:
-                    state.current_level = "MEDIUM"
+                    state.add_trigger("Off-Hours Entry (Authorized)")
                 else:
+                    state.current_level = "CRITICAL"
+                    state.add_trigger("Off-Hours Intrusion (Stranger)")
+            elif (state.action_class == 1 and state.action_confidence >= 0.70) or (state.is_inside_geofence and (state.run_detected or state.loitering_detected or state.path_anomaly_detected)):
+                state.current_level = "HIGH"
+            elif state.is_inside_geofence:
+                if state.is_authorized:
                     state.current_level = "LOW"
+                else:
+                    state.current_level = "HIGH"
+                    state.add_trigger("Restricted Area Stranger")
+            elif state.run_detected and state.loitering_detected:
+                state.current_level = "HIGH"
+            elif state.run_detected or state.loitering_detected or state.path_anomaly_detected:
+                state.current_level = "MEDIUM"
+            else:
+                state.current_level = "LOW"
 
 
         self._cleanup_stale_tracks(camera_name, current_time)
+        if action_manager is not None:
+            active_ids = set(active_states.keys())
+            action_manager.cleanup_stale_tracks(active_ids)
         return active_states
 
     def _cleanup_stale_tracks(self, camera_name: str, current_time: float):
@@ -378,6 +414,19 @@ class RiskAssessmentEngine:
         
         for tid in stale_ids:
             active_states.pop(tid, None)
+
+    def export_edge_packet(self, camera_name: str, current_time: float | None = None, to_json: bool = False, indent: int | None = 2):
+        """
+        ส่งออกข้อมูล Edge JSON Packet สำหรับส่งต่อให้ Central AI Server (Phase 4 Edge Protocol)
+        """
+        from logic.edge_protocol import EdgePacketExporter
+        exporter = EdgePacketExporter()
+        risk_states = self.camera_states.get(camera_name, {})
+        heatmap_grid = self.heatmap_manager.get_compressed_grid(camera_name, is_off_hours=self.is_off_hours())
+        
+        if to_json:
+            return exporter.to_json(camera_name, risk_states, heatmap_grid, self.is_off_hours(), current_time, indent=indent)
+        return exporter.build_packet(camera_name, risk_states, heatmap_grid, self.is_off_hours(), current_time)
 
     # ══════════════════════════════════════════════
     #  DRAW METHODS
@@ -476,10 +525,11 @@ class RiskAssessmentEngine:
 
             cv2.rectangle(frame, (x1_s, y1_s), (x2_s, y2_s), color, thickness)
 
-            # 2. วาดป้าย Badge ความเสี่ยงสะสมเหนือศีรษะ
-            # แสดงระดับพร้อมสาเหตุทริกเกอร์
-            reasons = ", ".join(state.trigger_reasons[:2]) if state.trigger_reasons else "Normal"
-            badge_text = f"ID:{track_id} | {state.current_level} ({reasons})"
+            # 2. วาดป้าย Badge ฟีเจอร์ Edge Node เหนือศีรษะ
+            face_tag = f" [{state.face_id}]" if state.face_id != "Unknown" else ""
+            action_tag = f" [{state.action_name}]" if state.action_name and state.action_name != "Normal" else ""
+            geo_tag = f" [{state.geofence_name}]" if state.is_inside_geofence and state.geofence_name else ""
+            badge_text = f"ID:{track_id}{face_tag}{action_tag}{geo_tag}"
             
             (tw, th), baseline = cv2.getTextSize(badge_text, cv2.FONT_HERSHEY_SIMPLEX, 0.45, 1)
             

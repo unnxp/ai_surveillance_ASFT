@@ -14,3 +14,14 @@ pandas
 matplotlib
 fastapi 
 uvicorn
+
+# Testing & Quality
+pytest
+pytest-cov
+pytest-mock
+pytest-asyncio
+ruff
+pyright
+
+# Vector Store
+faiss-cpu

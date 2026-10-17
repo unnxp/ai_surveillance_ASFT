@@ -1,3 +1,16 @@
+# ==============================================================================
+#  วิธีการรันเครื่องมือวาด Geofence (Geofence Coordinates Drawer)
+# ==============================================================================
+#  1. รันสำหรับ Camera 1:
+#     python tools/geofence_drawer.py 1
+#
+#  2. รันสำหรับ Camera 2:
+#     python tools/geofence_drawer.py 2
+#
+#  3. รันแบบเลือกกล้องจากเมนู:
+#     python tools/geofence_drawer.py
+# ==============================================================================
+
 import os
 import sys
 import shutil
@@ -30,8 +43,8 @@ def main():
     
     if camera_choice in ["1", "cam1", "camera1"]:
         camera_name = "Camera 1 (Always ON)"
-        video_source = r"C:\Users\M S I\Desktop\project_main\ai_surveillance\videos\3318088_hd_1920_1080_25fps.mp4" # ✅ เก็บไว้สำหรับเปลี่ยนกลับมาทดสอบ
-        # video_source = "rtsp://admin:password@192.168.1.100:554/stream1"
+        # video_source = r"C:\Users\M S I\Desktop\project_main\ai_surveillance\videos\3318088_hd_1920_1080_25fps.mp4" # ✅ เก็บไว้สำหรับเปลี่ยนกลับมาทดสอบ
+        video_source = "rtsp://admin:<PASSWORD>@192.168.137.107:554/stream1"
     elif camera_choice in ["2", "cam2", "camera2"]:
         camera_name = "Camera 2 (PIR + Self Hold)"
         video_source = r"C:\Users\M S I\Desktop\project_main\ai_surveillance\videos\test_for_cam2.mp4"

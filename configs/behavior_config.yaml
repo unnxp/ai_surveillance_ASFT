@@ -10,14 +10,14 @@ geofences:
   Camera 1 (Always ON):
   - name: Restricted Entrance
     polygon:
-    - - 0.152
-      - 0.607
-    - - 0.085
-      - 0.707
-    - - 0.332
-      - 0.713
-    - - 0.334
-      - 0.609
+    - - 0.502
+      - 0.261
+    - - 0.637
+      - 0.267
+    - - 0.615
+      - 0.95
+    - - 0.499
+      - 0.924
   Camera 2 (PIR + Self Hold):
   - name: Private Corridor
     polygon:

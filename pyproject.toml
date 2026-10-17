@@ -1,0 +1,88 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ai-surveillance"
+version = "0.1.0"
+requires-python = ">=3.10"
+
+# ==============================================================================
+# PYTEST CONFIGURATION
+# ==============================================================================
+[tool.pytest.ini_options]
+minversion = "7.0"
+addopts = "-ra -q --cov=ai --cov=logic --cov-report=term-missing"
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+markers = [
+    "gpu: marks tests requiring CUDA hardware",
+    "slow: marks slow-running model training or benchmark tests",
+    "onnx: marks ONNX Runtime conversion and inference tests",
+]
+filterwarnings = [
+    "ignore::DeprecationWarning:torch.*:",
+    "ignore::UserWarning:cv2.*:",
+]
+
+# ==============================================================================
+# RUFF LINT & FORMAT CONFIGURATION
+# ==============================================================================
+[tool.ruff]
+target-version = "py310"
+line-length = 100
+exclude = [
+    ".git",
+    "__pycache__",
+    "env",
+    "venv",
+    "datasets",
+    "models",
+]
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle errors
+    "W",   # pycodestyle warnings
+    "F",   # Pyflakes
+    "I",   # isort (import sorting)
+    "B",   # flake8-bugbear
+    "UP",  # pyupgrade (modernize Python syntax)
+    "N",   # pep8-naming
+]
+ignore = [
+    "E501", # Line too long (handled by ruff formatter)
+    "B008", # Do not perform function call in argument defaults (FastAPI Depends)
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["ai", "logic", "configs", "server", "edge", "cameras"]
+
+# ==============================================================================
+# MYPY CONFIGURATION
+# ==============================================================================
+[tool.mypy]
+python_version = "3.10"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = false
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = [
+    "cv2.*",
+    "ultralytics.*",
+    "onnxruntime.*",
+]
+ignore_missing_imports = true
+
+# ==============================================================================
+# PYRIGHT CONFIGURATION
+# ==============================================================================
+[tool.pyright]
+include = ["ai", "logic", "server", "edge", "main.py"]
+exclude = ["**/__pycache__", "datasets", "models"]
+pythonVersion = "3.10"
+typeCheckingMode = "standard"
+reportMissingImports = true
+reportMissingTypeStubs = false

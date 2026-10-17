@@ -311,3 +311,124 @@ class ArcFaceEmbedder:
             embedding = embedding / norm
             
         return embedding
+
+
+class FaceRecognitionManager:
+    """
+    Manages face detection, embedding extraction, gallery matching (1:N search),
+    and periodic track face identification.
+    """
+    def __init__(self, known_faces_dir=None, threshold=0.55, det_model_path=None, emb_model_path=None):
+        if known_faces_dir is None:
+            project_root = os.path.dirname(os.path.dirname(__file__))
+            known_faces_dir = os.path.join(project_root, "data", "known_faces")
+            
+        self.known_faces_dir = known_faces_dir
+        self.threshold = threshold
+        self.detector = SCRFDDetector(model_path=det_model_path)
+        self.embedder = ArcFaceEmbedder(model_path=emb_model_path)
+        self.known_embeddings = {}  # {name: np.ndarray}
+        self.load_gallery()
+
+    def load_gallery(self):
+        """
+        Loads and indexes all face images from known_faces_dir.
+        """
+        self.known_embeddings.clear()
+        if not os.path.exists(self.known_faces_dir):
+            os.makedirs(self.known_faces_dir, exist_ok=True)
+            return
+
+        valid_extensions = (".png", ".jpg", ".jpeg")
+        for file in os.listdir(self.known_faces_dir):
+            if file.lower().endswith(valid_extensions):
+                name = os.path.splitext(file)[0]
+                img_path = os.path.join(self.known_faces_dir, file)
+                img = cv2.imread(img_path)
+                if img is None:
+                    continue
+
+                if img.shape[0] == 112 and img.shape[1] == 112:
+                    emb = self.embedder.get_embedding(img)
+                    self.known_embeddings[name] = emb
+                else:
+                    faces = self.detector.detect(img)
+                    if len(faces) == 1:
+                        aligned = align_face(img, faces[0]['kps'])
+                        emb = self.embedder.get_embedding(aligned)
+                        self.known_embeddings[name] = emb
+                        cv2.imwrite(img_path, aligned)
+                    elif len(faces) > 1:
+                        # If multiple faces, log warning and use largest face
+                        best_face = max(faces, key=lambda f: (f['bbox'][2]-f['bbox'][0])*(f['bbox'][3]-f['bbox'][1]))
+                        aligned = align_face(img, best_face['kps'])
+                        emb = self.embedder.get_embedding(aligned)
+                        self.known_embeddings[name] = emb
+
+    def match_embedding(self, emb: np.ndarray) -> tuple[str, float, bool]:
+        """
+        Matches a 512-dim face embedding against the gallery.
+        Returns (identity_name, similarity_score, is_authorized).
+        """
+        if not self.known_embeddings or emb is None:
+            return "Stranger", 0.0, False
+
+        best_name = "Stranger"
+        max_sim = 0.0
+
+        for name, known_emb in self.known_embeddings.items():
+            sim = float(np.dot(emb, known_emb))
+            if sim > max_sim:
+                max_sim = sim
+                best_name = name
+
+        if max_sim >= self.threshold:
+            clean_name = best_name.replace("_", " ").title()
+            return clean_name, max_sim, True
+        else:
+            return "Stranger", max_sim, False
+
+    def extract_face_embedding(self, crop_bgr: np.ndarray, max_dim: int = 224) -> tuple[np.ndarray | None, float]:
+        """
+        Extracts a 512-dim ArcFace embedding vector from a person crop (Edge Node Feature Extractor).
+        Resizes large crops down to max_dim (224px) for fast ONNX SCRFD detection.
+        Returns (face_embedding, detection_score).
+        """
+        if crop_bgr is None or crop_bgr.size == 0:
+            return None, 0.0
+
+        h, w = crop_bgr.shape[:2]
+        if max(h, w) > max_dim:
+            scale = max_dim / float(max(h, w))
+            crop_input = cv2.resize(crop_bgr, (int(w * scale), int(h * scale)))
+        else:
+            crop_input = crop_bgr
+
+        faces = self.detector.detect(crop_input)
+        if not faces:
+            return None, 0.0
+
+        best_face = max(faces, key=lambda f: f['score'])
+        aligned = align_face(crop_input, best_face['kps'])
+        emb = self.embedder.get_embedding(aligned)
+        return emb, float(best_face['score'])
+
+    def recognize_face_in_crop(self, crop_bgr: np.ndarray) -> tuple[str, float, bool, np.ndarray]:
+        """
+        Detects, aligns, embeds, and matches a face within a cropped BGR image (e.g. person bbox).
+        Returns (identity_name, match_score, is_authorized, face_embedding).
+        """
+        if crop_bgr is None or crop_bgr.size == 0:
+            return "Stranger", 0.0, False, None
+
+        faces = self.detector.detect(crop_bgr)
+        if not faces:
+            return "Unknown", 0.0, False, None
+
+        # Pick face with highest detection score
+        best_face = max(faces, key=lambda f: f['score'])
+        aligned = align_face(crop_bgr, best_face['kps'])
+        emb = self.embedder.get_embedding(aligned)
+        identity, sim, is_auth = self.match_embedding(emb)
+        return identity, sim, is_auth, emb
+
