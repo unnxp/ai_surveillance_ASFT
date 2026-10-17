@@ -219,3 +219,19 @@ def test_existing_local_onnx_models_accept_synthetic_blank_frame():
     embedding = extractor.embedder.get_embedding(np.zeros((112, 112, 3), dtype=np.uint8))
     assert embedding.shape == (512,)
     assert np.all(np.isfinite(embedding))
+
+
+def test_shipped_face_config_loads_on_edge_and_central(tmp_path):
+    from pathlib import Path
+
+    from edge.face_pipeline import load_face_settings
+    from server.database import load_face_match_threshold
+
+    shipped = Path(__file__).resolve().parent.parent / "configs" / "face_runtime.yaml"
+    assert load_face_settings(shipped).model_version
+    assert load_face_match_threshold(shipped) == 0.275
+
+    unexpected = tmp_path / "face.yaml"
+    unexpected.write_text(shipped.read_text(encoding="utf-8") + "\nsurprise: {}\n", encoding="utf-8")
+    with pytest.raises(ValueError):
+        load_face_settings(unexpected)

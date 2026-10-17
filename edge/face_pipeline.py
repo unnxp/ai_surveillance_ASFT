@@ -37,7 +37,9 @@ def load_face_settings(path: Path) -> FaceRuntimeSettings:
 
     with Path(path).open(encoding="utf-8") as file:
         values = yaml.safe_load(file)
-    if not isinstance(values, dict) or set(values) != {"face_runtime"}:
+    # "face_matching" holds Central's match threshold; the edge only reads face_runtime.
+    if (not isinstance(values, dict) or "face_runtime" not in values
+            or not set(values) <= {"face_runtime", "face_matching"}):
         raise ValueError("Invalid face runtime configuration")
     return FaceRuntimeSettings(**values["face_runtime"])
 
