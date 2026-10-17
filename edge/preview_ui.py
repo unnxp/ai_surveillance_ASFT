@@ -87,6 +87,8 @@ def _track_style(info: dict, action: str | None) -> tuple[tuple[int, int, int], 
     elif status == "unknown":
         color = UNKNOWN
         parts.append("Unknown")
+    if info.get("global_person_id"):
+        parts.insert(0, str(info["global_person_id"]))
     if action in ACTION_ALERTS:  # "Normal"/"Insufficient" add noise in crowds
         parts.append(action.replace("_", " "))
         color = ALERT
@@ -168,7 +170,8 @@ def render_tile(frame: np.ndarray, camera_id: str, state: dict, rules: dict | No
             parts.append("IN ZONE")
         _corner_box(tile, x1, y1, x2, y2, color)
         compact = (y2 - y1) < 70 and color != ALERT  # small, non-alert boxes: id only
-        label = f"#{track_id}" if compact else "  ".join([f"#{track_id}", *parts])
+        gid = info.get("global_person_id")
+        label = (gid or f"#{track_id}") if compact else "  ".join([f"#{track_id}", *parts])
         draw_label(tile, label, (x1, y1 - 3), color, scale=0.45)
         cv2.circle(tile, ((x1 + x2) // 2, y2), 4, WHITE, -1, AA)
         cv2.circle(tile, ((x1 + x2) // 2, y2), 4, color, 1, AA)

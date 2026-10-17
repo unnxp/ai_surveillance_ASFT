@@ -157,6 +157,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--weights", type=Path, default=ROOT / "yolo26n.pt")
     parser.add_argument("--action", action="store_true", help="Enable the local action checkpoint")
     parser.add_argument("--face", action="store_true", help="Enable experimental local Face-Zone candidates")
+    parser.add_argument("--reid", action="store_true",
+                        help="Send appearance tracklets so Central can link people across cameras")
     parser.add_argument("--face-config", type=Path,
                         default=ROOT / "configs" / "face_runtime.yaml")
     parser.add_argument("--action-weights", type=Path,
@@ -271,6 +273,15 @@ def main(argv: Sequence[str] | None = None) -> int:
                 print("Action mode: 32 fresh frames per track; thresholds are unvalidated baselines.")
             else:
                 print("Detection mode: person observations only; use --action for action candidates.")
+        gateway_boot_id = str(uuid4())
+        tracklets = None
+        if args.reid and not args.demo:
+            from edge.appearance import AppearanceEncoder, TrackletBuilder
+
+            tracklets = TrackletBuilder(AppearanceEncoder(device=device), central_client.send_tracklet,
+                                        gateway_boot_id)
+            versions["appearance"] = "efficientnet_b0-imagenet"
+            print("ReID mode: appearance tracklets sent to Central for cross-camera association.")
         preview = None
         if args.preview:
             engine = None if args.demo else action_engine
@@ -296,7 +307,9 @@ def main(argv: Sequence[str] | None = None) -> int:
                 resources.callback(source.close)
                 cameras.append(CameraRuntime(name, source))
 
-            def _preview_cb(frames, states):
+            def _cycle_cb(frames, states):
+                if tracklets is not None:
+                    tracklets.observe(frames, states)  # also tags tracks with their Global ID
                 if preview is not None:
                     preview.update(frames, states)
                     if preview.should_stop:
@@ -304,13 +317,14 @@ def main(argv: Sequence[str] | None = None) -> int:
 
             gateway = SharedGateway(
                 cameras, processor, central_client, gateway_id=args.gateway_id,
-                gateway_boot_id=str(uuid4()),
+                gateway_boot_id=gateway_boot_id,
                 configuration_version=("face-zone-experimental-v1" if args.face else
                                        "week2b-v1" if not args.demo else "week1b-v1"),
                 model_versions=versions, clock=lambda: datetime.now(timezone.utc),
                 event_id_factory=uuid4,
                 evidence_encoder=evidence_encoder,
-                preview_callback=_preview_cb if preview is not None else None,
+                preview_callback=(_cycle_cb if preview is not None or tracklets is not None
+                                  else None),
             )
             summary = run_gateway(gateway, fps=args.fps, max_cycles=args.max_cycles)
         print(f"Cycles={summary.cycles} events={summary.events_sent} "
