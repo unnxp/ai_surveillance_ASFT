@@ -1,0 +1,608 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>AI Surveillance Console</title>
+  <style>
+    :root {
+      --bg: #0d1117; --panel: #161b22; --panel-2: #1c232c; --line: #2a323d;
+      --text: #e6edf3; --muted: #8b96a3; --accent: #3fb6ff;
+      --critical: #ff4d6d; --high: #ff6b3d; --medium: #f5b13d; --low: #7d8a99;
+      --ok: #3fcf8e; --reg: #3f8cff; --unknown: #ff9d3d;
+      --radius: 10px; --mono: ui-monospace, "Cascadia Code", Consolas, monospace;
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: var(--bg); color: var(--text);
+           font: 14px/1.45 "Segoe UI", system-ui, -apple-system, sans-serif; }
+    button { font: inherit; cursor: pointer; border-radius: 7px; border: 1px solid var(--line);
+             background: var(--panel-2); color: var(--text); padding: 6px 12px; }
+    button:hover { border-color: var(--accent); }
+    select, textarea { font: inherit; background: var(--bg); color: var(--text);
+                       border: 1px solid var(--line); border-radius: 7px; padding: 6px 8px; }
+    textarea { width: 100%; min-height: 64px; resize: vertical; }
+    code, .mono { font-family: var(--mono); font-size: 12.5px; }
+
+    header { position: sticky; top: 0; z-index: 10; display: flex; align-items: center; gap: 18px;
+             padding: 12px 22px; background: rgba(13,17,23,.92); backdrop-filter: blur(6px);
+             border-bottom: 1px solid var(--line); }
+    .brand { display: flex; align-items: center; gap: 10px; font-weight: 700; letter-spacing: .4px; }
+    .brand svg { color: var(--accent); }
+    nav { display: flex; gap: 4px; margin-left: 12px; }
+    nav button { border: none; background: transparent; color: var(--muted); padding: 7px 14px; }
+    nav button[aria-selected="true"] { background: var(--panel-2); color: var(--text); }
+    .hdr-right { margin-left: auto; display: flex; align-items: center; gap: 16px; color: var(--muted); }
+    .conn { display: inline-flex; align-items: center; gap: 6px; }
+    .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--ok); display: inline-block; }
+    .dot.bad { background: var(--critical); }
+    .live .dot { animation: pulse 1.6s infinite; }
+    @keyframes pulse { 50% { opacity: .35; } }
+
+    main { padding: 20px 22px 40px; max-width: 1500px; margin: 0 auto; }
+    .view[hidden] { display: none; }
+    .kpis { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 14px; margin-bottom: 18px; }
+    .kpi { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 14px 16px; }
+    .kpi .label { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .6px; }
+    .kpi .value { font-size: 28px; font-weight: 700; margin-top: 4px; }
+    .kpi .sub { color: var(--muted); font-size: 12px; }
+    .grid { display: grid; grid-template-columns: minmax(0, 1.55fr) minmax(0, 1fr); gap: 18px; }
+    .panel { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 16px; }
+    .panel h2 { margin: 0 0 12px; font-size: 15px; display: flex; align-items: center; gap: 8px; }
+    .panel h2 .count { color: var(--muted); font-weight: 400; }
+    .stack > * + * { margin-top: 18px; }
+    .empty { color: var(--muted); padding: 18px; text-align: center; border: 1px dashed var(--line); border-radius: 8px; }
+
+    .filters { display: flex; gap: 6px; margin-left: auto; }
+    .filters button { padding: 3px 10px; font-size: 12px; }
+    .filters button.on { border-color: var(--accent); color: var(--accent); }
+
+    .alert { display: grid; grid-template-columns: 6px 96px 1fr auto; gap: 14px; align-items: center;
+             background: var(--panel-2); border: 1px solid var(--line); border-radius: 9px;
+             padding: 10px 12px 10px 0; overflow: hidden; }
+    .alert + .alert { margin-top: 10px; }
+    .alert.new { animation: flash 1.2s 2; }
+    @keyframes flash { 50% { border-color: var(--critical); box-shadow: 0 0 0 2px rgba(255,77,109,.25); } }
+    .sev-strip { align-self: stretch; }
+    .thumb { width: 96px; height: 64px; border-radius: 6px; background: #0a0e13 center/cover no-repeat;
+             display: grid; place-items: center; color: var(--muted); font-size: 11px; }
+    .alert .title { font-weight: 600; }
+    .alert .meta { color: var(--muted); font-size: 12.5px; display: flex; flex-wrap: wrap; gap: 4px 12px; margin-top: 2px; }
+    .actions { display: flex; gap: 6px; }
+    .actions button { padding: 5px 10px; font-size: 12.5px; }
+    .btn-confirm { border-color: rgba(63,207,142,.5); color: var(--ok); }
+    .btn-reject { border-color: rgba(255,77,109,.5); color: var(--critical); }
+    .btn-primary { background: var(--accent); color: #04121c; border-color: var(--accent); font-weight: 600; }
+
+    .badge { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 11.5px; font-weight: 600;
+             border: 1px solid currentColor; }
+    .s-CRITICAL { color: var(--critical); } .s-HIGH { color: var(--high); }
+    .s-MEDIUM { color: var(--medium); } .s-LOW { color: var(--low); }
+    .bg-CRITICAL { background: var(--critical); } .bg-HIGH { background: var(--high); }
+    .bg-MEDIUM { background: var(--medium); } .bg-LOW { background: var(--low); }
+    .st-open { color: var(--accent); } .st-acknowledged { color: var(--medium); }
+    .st-confirmed { color: var(--ok); } .st-rejected { color: var(--low); } .st-reclassified { color: var(--reg); }
+
+    .cams { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; }
+    .cam { background: var(--panel-2); border: 1px solid var(--line); border-radius: 9px; padding: 10px 12px; }
+    .cam .name { font-weight: 600; display: flex; align-items: center; gap: 7px; }
+    .cam .meta { color: var(--muted); font-size: 12px; margin-top: 4px; }
+
+    table { width: 100%; border-collapse: collapse; }
+    th, td { text-align: left; padding: 7px 8px; border-bottom: 1px solid var(--line); font-size: 13px; }
+    th { color: var(--muted); font-weight: 500; font-size: 12px; text-transform: uppercase; letter-spacing: .4px; }
+
+    .bars .row { display: grid; grid-template-columns: 170px 1fr 34px; gap: 8px; align-items: center; margin: 6px 0; font-size: 12.5px; }
+    .bars .track { height: 8px; background: var(--panel-2); border-radius: 4px; overflow: hidden; }
+    .bars .fill { height: 100%; background: var(--accent); border-radius: 4px; }
+    .donut-wrap { display: flex; align-items: center; gap: 18px; }
+    .legend div { display: flex; align-items: center; gap: 8px; font-size: 12.5px; margin: 4px 0; }
+    .legend i { width: 10px; height: 10px; border-radius: 3px; display: inline-block; }
+
+    .journey { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+    .hop { background: var(--panel-2); border: 1px solid var(--line); border-radius: 8px; padding: 5px 10px; font-size: 12.5px; }
+    .hop small { color: var(--muted); display: block; font-size: 11px; }
+    .arrow { color: var(--muted); }
+    .person { padding: 14px 0; border-bottom: 1px solid var(--line); }
+    .person:last-child { border-bottom: none; }
+    .person-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+
+    .mc-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; }
+    .mc-grid img { width: 100%; border-radius: 8px; background: #fff; }
+    .stat-row { display: flex; gap: 24px; flex-wrap: wrap; margin: 6px 0 12px; }
+    .stat-row div { font-size: 12px; color: var(--muted); }
+    .stat-row b { display: block; font-size: 22px; color: var(--text); }
+    .note { color: var(--muted); font-size: 12.5px; margin-top: 10px; }
+
+    .drawer-bg { position: fixed; inset: 0; background: rgba(0,0,0,.55); z-index: 20; }
+    .drawer { position: fixed; top: 0; right: 0; bottom: 0; width: min(620px, 100%); z-index: 21;
+              background: var(--panel); border-left: 1px solid var(--line); padding: 20px; overflow-y: auto; }
+    .drawer h3 { font-size: 13px; color: var(--muted); text-transform: uppercase; letter-spacing: .5px; margin: 18px 0 8px; }
+    .evidence { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; }
+    .evidence img { width: 100%; border-radius: 8px; border: 1px solid var(--line); }
+    .tl { border-left: 2px solid var(--line); padding-left: 14px; }
+    .tl div { position: relative; padding: 4px 0; font-size: 13px; }
+    .tl div::before { content: ""; position: absolute; left: -20px; top: 10px; width: 10px; height: 10px;
+                      border-radius: 50%; background: var(--accent); }
+    .form-row { display: flex; gap: 10px; flex-wrap: wrap; margin: 8px 0; }
+
+    #toasts { position: fixed; right: 20px; bottom: 20px; z-index: 30; display: flex; flex-direction: column; gap: 8px; }
+    .toast { background: var(--panel-2); border: 1px solid var(--critical); border-left-width: 5px; border-radius: 8px;
+             padding: 10px 14px; min-width: 280px; box-shadow: 0 8px 24px rgba(0,0,0,.4); }
+    .toast b { color: var(--critical); }
+
+    @media (max-width: 1100px) { .grid, .mc-grid { grid-template-columns: 1fr; } .kpis { grid-template-columns: repeat(2, 1fr); } }
+    @media (max-width: 640px) {
+      header { flex-wrap: wrap; padding: 10px 16px; } nav { margin-left: 0; } main { padding: 16px; }
+      .alert { grid-template-columns: 6px 1fr; } .alert .thumb, .alert .actions { grid-column: 2; }
+    }
+  </style>
+</head>
+<body>
+<header>
+  <div class="brand">
+    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+      <path d="M3 7h13l3 3-3 3H3z"/><path d="M7 13v5"/><path d="M4 18h6"/><circle cx="12.5" cy="10" r="1.6" fill="currentColor"/>
+    </svg>
+    AI Surveillance Console
+  </div>
+  <nav role="tablist">
+    <button role="tab" data-view="ops" aria-selected="true">Operations</button>
+    <button role="tab" data-view="xcam" aria-selected="false">Cross-Camera</button>
+    <button role="tab" data-view="model" aria-selected="false">Model Card</button>
+  </nav>
+  <div class="hdr-right">
+    <button id="sound-btn" title="Toggle alert sound">🔔 Sound on</button>
+    <span class="conn live" id="conn"><span class="dot"></span><span id="conn-text">Connecting…</span></span>
+    <span class="mono" id="clock"></span>
+  </div>
+</header>
+
+<main>
+  <!-- ======================== OPERATIONS ======================== -->
+  <section class="view" id="view-ops">
+    <div class="kpis">
+      <div class="kpi"><div class="label">Open incidents</div><div class="value" id="k-open">–</div><div class="sub" id="k-open-sub"></div></div>
+      <div class="kpi"><div class="label">Alerts · last hour</div><div class="value" id="k-hour">–</div><div class="sub" id="k-hour-sub"></div></div>
+      <div class="kpi"><div class="label">Cameras online</div><div class="value" id="k-cams">–</div><div class="sub">heartbeat based</div></div>
+      <div class="kpi"><div class="label">Reviewed</div><div class="value" id="k-rev">–</div><div class="sub" id="k-rev-sub"></div></div>
+      <div class="kpi"><div class="label">False-positive rate</div><div class="value" id="k-fp">–</div><div class="sub">rejected / decided reviews</div></div>
+    </div>
+
+    <div class="grid">
+      <div class="panel">
+        <h2>Alert Queue <span class="count" id="alert-count"></span>
+          <span class="filters" id="filters">
+            <button data-f="active" class="on">Active</button><button data-f="all">All</button>
+          </span>
+        </h2>
+        <div id="alerts"><div class="empty">Waiting for incidents…</div></div>
+      </div>
+
+      <div class="stack">
+        <div class="panel"><h2>Cameras</h2><div class="cams" id="cams"><div class="empty">No heartbeats yet</div></div></div>
+        <div class="panel"><h2>Events by type <span class="count" id="type-sub"></span></h2><div class="bars" id="by-type"></div></div>
+        <div class="panel"><h2>Review outcomes</h2><div class="donut-wrap" id="outcomes"></div></div>
+        <div class="panel"><h2>Events per hour <span class="count">last 12 h (UTC)</span></h2><div id="per-hour"></div></div>
+      </div>
+    </div>
+
+    <div class="panel" style="margin-top:18px">
+      <h2>Recent event candidates</h2>
+      <div style="overflow-x:auto">
+        <table>
+          <thead><tr><th>Time</th><th>Camera</th><th>Type</th><th>Severity</th><th>Identity</th><th>Zone</th><th>Conf.</th><th>Validation</th></tr></thead>
+          <tbody id="events"></tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <!-- ======================== CROSS-CAMERA ======================== -->
+  <section class="view" id="view-xcam" hidden>
+    <div class="panel">
+      <h2>Global Person Sessions <span class="count">anonymous IDs linked across cameras by face similarity + camera topology</span></h2>
+      <div id="sessions"><div class="empty">No sessions yet</div></div>
+    </div>
+  </section>
+
+  <!-- ======================== MODEL CARD ======================== -->
+  <section class="view" id="view-model" hidden>
+    <div id="model-card"><div class="empty">Loading model card…</div></div>
+  </section>
+</main>
+
+<div id="drawer-root" hidden>
+  <div class="drawer-bg" onclick="closeDrawer()"></div>
+  <aside class="drawer" role="dialog" aria-modal="true" aria-labelledby="drawer-title">
+    <div style="display:flex;align-items:center;gap:10px">
+      <h2 id="drawer-title" style="margin:0;font-size:18px">Incident</h2>
+      <button style="margin-left:auto" onclick="closeDrawer()">Close ✕</button>
+    </div>
+    <div id="drawer-meta" style="color:var(--muted);margin-top:6px"></div>
+    <section aria-labelledby="evidence-heading">
+      <h3 id="evidence-heading">Evidence</h3>
+      <div class="evidence" id="evidence-viewer"></div>
+    </section>
+    <div id="drawer-body"></div>
+  </aside>
+</div>
+<div id="toasts" aria-live="polite"></div>
+<footer style="text-align:center;color:var(--muted);font-size:12px;padding:0 0 24px">
+  Alerts are shown on this console only &mdash; no external alert is sent. Evidence images stay on the local Central Server.
+</footer>
+
+<script>
+  const SEV_ORDER = { CRITICAL: 0, HIGH: 1, MEDIUM: 2, LOW: 3 };
+  const TYPE_LABEL = {
+    possible_person_violence: 'Possible violence', possible_property_crime: 'Possible property crime',
+    unauthorized_zone_entry: 'Unauthorized zone entry', unknown_person_in_restricted_zone: 'Unknown person in restricted zone',
+    tripwire_crossing: 'Tripwire crossing', possible_loitering: 'Possible loitering', cross_camera_handoff: 'Cross-camera handoff',
+  };
+  const state = { filter: 'active', seen: null, sound: true, thumbs: {}, incidents: [], events: [] };
+
+  const $ = id => document.getElementById(id);
+  function el(tag, attrs = {}, ...children) {
+    const node = document.createElement(tag);
+    for (const [k, v] of Object.entries(attrs)) {
+      if (k === 'class') node.className = v;
+      else if (k.startsWith('on')) node.addEventListener(k.slice(2), v);
+      else if (v != null) node.setAttribute(k, v);
+    }
+    for (const c of children.flat()) if (c != null) node.append(c instanceof Node ? c : String(c));
+    return node;
+  }
+  const label = t => TYPE_LABEL[t] || (t || '').replaceAll('_', ' ');
+  const pct = v => v == null ? '–' : (v * 100).toFixed(v < 0.1 ? 1 : 0) + '%';
+  function ago(iso) {
+    const s = Math.max(0, (Date.now() - new Date(iso).getTime()) / 1000);
+    if (s < 60) return Math.floor(s) + 's ago';
+    if (s < 3600) return Math.floor(s / 60) + 'm ago';
+    if (s < 86400) return Math.floor(s / 3600) + 'h ago';
+    return new Date(iso).toLocaleDateString();
+  }
+  const time = iso => new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  const sevBadge = s => el('span', { class: 'badge s-' + s }, s);
+  const stBadge = s => el('span', { class: 'badge st-' + s }, s);
+  async function getJSON(url) {
+    const r = await fetch(url, { cache: 'no-store' });
+    if (!r.ok) throw new Error(url + ' ' + r.status);
+    return r.json();
+  }
+
+  // ---------- tabs, clock, sound
+  document.querySelectorAll('nav button').forEach(b => b.addEventListener('click', () => {
+    document.querySelectorAll('nav button').forEach(x => x.setAttribute('aria-selected', x === b));
+    document.querySelectorAll('.view').forEach(v => v.hidden = v.id !== 'view-' + b.dataset.view);
+    if (b.dataset.view === 'model') loadModelCard();
+    if (b.dataset.view === 'xcam') renderSessions();
+  }));
+  setInterval(() => $('clock').textContent = new Date().toLocaleTimeString(), 1000);
+  $('sound-btn').onclick = () => {
+    state.sound = !state.sound;
+    $('sound-btn').textContent = state.sound ? '🔔 Sound on' : '🔕 Sound off';
+  };
+  $('filters').addEventListener('click', e => {
+    if (!e.target.dataset.f) return;
+    state.filter = e.target.dataset.f;
+    [...$('filters').children].forEach(b => b.classList.toggle('on', b === e.target));
+    renderAlerts();
+  });
+  function beep() {
+    if (!state.sound) return;
+    try {
+      const ctx = new (window.AudioContext || window.webkitAudioContext)();
+      [0, 0.18].forEach(t => {
+        const o = ctx.createOscillator(), g = ctx.createGain();
+        o.frequency.value = 880; o.connect(g); g.connect(ctx.destination);
+        g.gain.setValueAtTime(0.15, ctx.currentTime + t); g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + t + 0.15);
+        o.start(ctx.currentTime + t); o.stop(ctx.currentTime + t + 0.16);
+      });
+    } catch (_) { /* audio blocked until user interaction */ }
+  }
+  function toast(inc) {
+    const t = el('div', { class: 'toast' }, el('b', {}, inc.highest_severity + ' alert'), ' · ', inc.primary_camera,
+                 el('div', {}, label(inc.timeline?.at(-1)?.candidate_type)),
+                 el('div', { class: 'mono', style: 'color:var(--muted)' }, inc.incident_id + ' · ' + inc.global_person_id));
+    t.onclick = () => openDrawer(inc.incident_id);
+    $('toasts').append(t);
+    setTimeout(() => t.remove(), 7000);
+  }
+
+  // ---------- evidence thumbnails (cached per event)
+  async function thumbFor(eventId) {
+    if (eventId in state.thumbs) return state.thumbs[eventId];
+    state.thumbs[eventId] = null;
+    try {
+      const ev = await getJSON('/api/v1/events/' + encodeURIComponent(eventId) + '/evidence');
+      const items = (ev.evidence || []).filter(i => i.available);
+      const pick = items.find(i => i.kind === 'keyframe') || items[0];
+      state.thumbs[eventId] = pick ? '/api/v1/evidence/' + encodeURIComponent(pick.evidence_id) : null;
+    } catch (_) { /* no evidence */ }
+    return state.thumbs[eventId];
+  }
+
+  // ---------- operations view
+  function renderAlerts() {
+    const list = state.incidents
+      .filter(i => state.filter === 'all' || i.status === 'open' || i.status === 'acknowledged')
+      .sort((a, b) => (SEV_ORDER[a.highest_severity] - SEV_ORDER[b.highest_severity]) ||
+                      (new Date(b.updated_at_utc) - new Date(a.updated_at_utc)));
+    $('alert-count').textContent = list.length ? '· ' + list.length : '';
+    if (!list.length) { $('alerts').replaceChildren(el('div', { class: 'empty' }, 'No incidents in this view')); return; }
+    $('alerts').replaceChildren(...list.slice(0, 30).map(inc => {
+      const last = inc.timeline?.at(-1);
+      const cams = [...new Set((inc.timeline || []).map(t => t.camera_id))];
+      const thumb = el('div', { class: 'thumb' }, 'no image');
+      if (last && last.evidence_count) thumbFor(last.event_id).then(src => {
+        if (src) { thumb.style.backgroundImage = `url("${src}")`; thumb.textContent = ''; }
+      });
+      const quick = (action, extra) => async e => { e.stopPropagation(); await review(inc.incident_id, { action, ...extra }); };
+      const open = inc.status === 'open' || inc.status === 'acknowledged';
+      return el('div', { class: 'alert' + (state.fresh?.has(inc.incident_id) ? ' new' : '') },
+        el('div', { class: 'sev-strip bg-' + inc.highest_severity }),
+        thumb,
+        el('div', {},
+          el('div', { class: 'title' }, label(last?.candidate_type), ' ', sevBadge(inc.highest_severity), ' ', stBadge(inc.status)),
+          el('div', { class: 'meta' },
+            el('span', {}, '📷 ' + cams.join(' → ')),
+            el('span', { class: 'mono' }, inc.global_person_id),
+            el('span', {}, (inc.timeline?.length || 0) + ' event(s)'),
+            el('span', { title: inc.updated_at_utc }, ago(inc.updated_at_utc)))),
+        el('div', { class: 'actions' },
+          open ? el('button', { class: 'btn-confirm', onclick: quick('confirm', { final_severity: inc.highest_severity }) }, '✓ Confirm') : null,
+          open ? el('button', { class: 'btn-reject', onclick: quick('reject', { false_positive_reason: 'benign_activity' }) }, '✕ Reject') : null,
+          el('button', { onclick: () => openDrawer(inc.incident_id) }, 'Details')));
+    }));
+  }
+
+  function renderCameras(cameras) {
+    if (!cameras.length) { $('cams').replaceChildren(el('div', { class: 'empty' }, 'No heartbeats yet')); return; }
+    $('cams').replaceChildren(...cameras.map(c => {
+      const ok = c.status === 'ONLINE' || c.status === 'DEGRADED';
+      return el('div', { class: 'cam' },
+        el('div', { class: 'name' }, el('span', { class: 'dot' + (ok ? '' : ' bad') }), c.camera_id),
+        el('div', { class: 'meta' }, c.status + ' · ' + ago(c.observed_at_utc)),
+        el('div', { class: 'meta' }, (c.ai_fps != null ? c.ai_fps.toFixed(1) + ' AI FPS · ' : '') + c.active_tracks + ' tracks'),
+        el('div', { class: 'meta mono', title: JSON.stringify(c.model_versions) }, c.model_versions?.detector || ''));
+    }));
+  }
+
+  function renderStats(s) {
+    $('k-open').textContent = s.incidents.open;
+    const sev = s.incidents.by_severity || {};
+    $('k-open-sub').replaceChildren(...['CRITICAL', 'HIGH', 'MEDIUM', 'LOW'].filter(k => sev[k])
+      .map(k => el('span', { class: 's-' + k, style: 'margin-right:8px' }, sev[k] + ' ' + k)));
+    $('k-hour').textContent = s.events.last_hour;
+    $('k-hour-sub').textContent = s.events.sampled + ' recent events sampled';
+    $('k-cams').textContent = s.cameras.online + ' / ' + s.cameras.total;
+    $('k-rev').textContent = s.incidents.total ? pct(s.incidents.reviewed / s.incidents.total) : '–';
+    $('k-rev-sub').textContent = s.incidents.reviewed + ' of ' + s.incidents.total + ' incidents';
+    $('k-fp').textContent = pct(s.incidents.false_positive_rate);
+
+    const types = Object.entries(s.events.by_type).sort((a, b) => b[1] - a[1]);
+    const max = Math.max(1, ...types.map(t => t[1]));
+    $('by-type').replaceChildren(...(types.length ? types.map(([t, n]) => el('div', { class: 'row' },
+      el('span', {}, label(t)), el('div', { class: 'track' }, el('div', { class: 'fill', style: `width:${n / max * 100}%` })),
+      el('span', { class: 'mono' }, n))) : [el('div', { class: 'empty' }, 'No events yet')]));
+
+    const colors = { open: 'var(--accent)', acknowledged: 'var(--medium)', confirmed: 'var(--ok)', rejected: 'var(--low)', reclassified: 'var(--reg)' };
+    const entries = Object.entries(s.incidents.by_status).filter(e => e[1]);
+    const total = entries.reduce((a, e) => a + e[1], 0);
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.setAttribute('viewBox', '0 0 42 42'); svg.setAttribute('width', '120'); svg.setAttribute('height', '120');
+    let offset = 25;
+    const ring = (stroke, len) => {
+      const c = document.createElementNS(svg.namespaceURI, 'circle');
+      Object.entries({ cx: 21, cy: 21, r: 15.915, fill: 'none', stroke, 'stroke-width': 5,
+        'stroke-dasharray': `${len} ${100 - len}`, 'stroke-dashoffset': offset }).forEach(([k, v]) => c.setAttribute(k, v));
+      svg.append(c); offset -= len;
+    };
+    ring('var(--panel-2)', 100); offset = 25;
+    entries.forEach(([k, n]) => ring(colors[k], n / total * 100));
+    const center = document.createElementNS(svg.namespaceURI, 'text');
+    Object.entries({ x: 21, y: 23.5, 'text-anchor': 'middle', fill: 'var(--text)', 'font-size': 8, 'font-weight': 700 })
+      .forEach(([k, v]) => center.setAttribute(k, v));
+    center.textContent = total; svg.append(center);
+    $('outcomes').replaceChildren(svg, el('div', { class: 'legend' }, ...(entries.length ? entries.map(([k, n]) =>
+      el('div', {}, el('i', { style: 'background:' + colors[k] }), k + ' · ' + n)) : [el('div', {}, 'No incidents yet')])));
+
+    const hours = s.events.per_hour, hmax = Math.max(1, ...hours.map(h => h.count));
+    const W = 360, H = 90, bw = W / hours.length;
+    const bars = hours.map((h, i) => {
+      const bh = h.count / hmax * (H - 18);
+      return `<rect x="${i * bw + 3}" y="${H - 14 - bh}" width="${bw - 6}" height="${bh}" rx="2" fill="var(--accent)"><title>${h.count} events</title></rect>` +
+             (i % 3 === 0 ? `<text x="${i * bw + bw / 2}" y="${H - 2}" fill="var(--muted)" font-size="9" text-anchor="middle">${new Date(h.hour_utc).getUTCHours()}:00</text>` : '');
+    }).join('');
+    $('per-hour').innerHTML = `<svg viewBox="0 0 ${W} ${H}" width="100%" role="img" aria-label="Events per hour">${bars}</svg>`;
+  }
+
+  function renderEvents(events) {
+    $('events').replaceChildren(...(events.length ? events.slice(0, 25).map(e => {
+      const a = e.attributes || {};
+      return el('tr', {},
+        el('td', { class: 'mono', title: e.observed_at_utc }, time(e.observed_at_utc)),
+        el('td', {}, e.camera_id), el('td', {}, label(e.candidate_type)),
+        el('td', {}, a.severity ? sevBadge(a.severity) : '–'),
+        el('td', {}, a.display_name || a.person_id || (e.candidate_type === 'unknown_person_in_restricted_zone' ? 'Unknown' : '–')),
+        el('td', {}, a.restricted_zone_id || '–'),
+        el('td', { class: 'mono' }, e.confidence != null ? Number(e.confidence).toFixed(2) : '–'),
+        el('td', {}, a.synthetic ? el('span', { class: 'badge', style: 'color:var(--muted)' }, 'synthetic') :
+                     a.experimental ? el('span', { class: 'badge', style: 'color:var(--medium)' }, 'experimental') : ''));
+    }) : [el('tr', {}, el('td', { colspan: 8, class: 'empty' }, 'No event candidates yet'))]));
+  }
+
+  // ---------- incident drawer
+  async function openDrawer(id) {
+    $('drawer-root').hidden = false;
+    const body = $('drawer-body');
+    body.replaceChildren(el('div', { class: 'empty' }, 'Loading…'));
+    $('drawer-meta').replaceChildren();
+    $('evidence-viewer').replaceChildren();
+    let inc;
+    try { inc = await getJSON('/api/v1/incidents/' + encodeURIComponent(id)); }
+    catch (e) { body.replaceChildren(el('div', { class: 'empty' }, 'Unable to load incident')); return; }
+    $('drawer-title').replaceChildren(inc.incident_id + ' ', sevBadge(inc.highest_severity), ' ', stBadge(inc.status));
+
+    const evidence = $('evidence-viewer');
+    evidence.replaceChildren(el('div', { class: 'empty' }, 'Loading evidence…'));
+    Promise.all((inc.timeline || []).filter(t => t.evidence_count).map(t =>
+      getJSON('/api/v1/events/' + encodeURIComponent(t.event_id) + '/evidence').catch(() => null)))
+      .then(all => {
+        const imgs = all.flatMap(ev => (ev?.evidence || []).filter(i => i.available)).map(i => {
+          const src = '/api/v1/evidence/' + encodeURIComponent(i.evidence_id);
+          return el('a', { href: src, target: '_blank', rel: 'noopener' },
+                    el('img', { src, alt: i.kind === 'person_crop' ? 'Person crop' : 'Keyframe' }));
+        });
+        evidence.replaceChildren(...(imgs.length ? imgs : [el('div', { class: 'empty' }, 'No evidence images')]));
+      });
+
+    const form = el('div');
+    const field = (name, opts, sel) => el('select', { id: name }, ...opts.map(o => el('option', { value: o, ...(o === sel ? { selected: '' } : {}) }, o)));
+    const sevs = ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW'];
+    const show = kind => {
+      const notes = el('textarea', { id: 'f-notes', placeholder: 'Notes (optional)' });
+      const rows = {
+        confirm: [el('label', {}, 'Final severity ', field('f-sev', sevs, inc.highest_severity))],
+        reject: [el('label', {}, 'Reason ', field('f-reason', ['benign_activity', 'lighting_shadow', 'reflection', 'misclassification', 'other'], 'benign_activity'))],
+        reclassify: [el('label', {}, 'Type ', field('f-type', Object.keys(TYPE_LABEL))), el('label', {}, 'Severity ', field('f-sev', sevs, 'MEDIUM'))],
+      }[kind];
+      form.replaceChildren(el('div', { class: 'form-row' }, ...rows), notes,
+        el('div', { class: 'form-row' }, el('button', { class: 'btn-primary', onclick: async () => {
+          const p = { action: kind, notes: $('f-notes').value || null };
+          if (kind === 'confirm') p.final_severity = $('f-sev').value;
+          if (kind === 'reject') p.false_positive_reason = $('f-reason').value;
+          if (kind === 'reclassify') { p.reclassified_type = $('f-type').value; p.final_severity = $('f-sev').value; }
+          await review(inc.incident_id, p); openDrawer(inc.incident_id);
+        } }, 'Submit ' + kind)));
+    };
+
+    $('drawer-meta').replaceChildren('Person ', el('span', { class: 'mono' }, inc.global_person_id),
+      ' · primary camera ', inc.primary_camera, ' · opened ', ago(inc.created_at_utc));
+    body.replaceChildren(
+      el('h3', {}, 'Timeline'),
+      el('div', { class: 'tl' }, ...(inc.timeline || []).map(t => el('div', {},
+        el('span', { class: 'mono' }, time(t.observed_at_utc)), ' · ', t.camera_id, ' · ', label(t.candidate_type), ' ', sevBadge(t.severity)))),
+      el('h3', {}, 'Review'),
+      el('div', { class: 'form-row' },
+        el('button', { onclick: async () => { await review(inc.incident_id, { action: 'acknowledge' }); openDrawer(inc.incident_id); } }, 'Acknowledge'),
+        el('button', { class: 'btn-confirm', onclick: () => show('confirm') }, 'Confirm…'),
+        el('button', { class: 'btn-reject', onclick: () => show('reject') }, 'Reject…'),
+        el('button', { onclick: () => show('reclassify') }, 'Reclassify…')),
+      form,
+      el('h3', {}, 'Review history'),
+      ...(inc.reviews?.length ? inc.reviews.map(r => el('div', { style: 'font-size:13px;margin:4px 0' },
+        el('span', { class: 'mono' }, time(r.reviewed_at_utc)), ' · ', el('b', {}, r.action), ' by ', r.reviewed_by,
+        r.final_severity ? ' · ' + r.final_severity : '', r.reclassified_type ? ' · ' + label(r.reclassified_type) : '',
+        r.false_positive_reason ? ' · ' + r.false_positive_reason : '', r.notes ? el('div', { style: 'color:var(--muted)' }, r.notes) : null))
+        : [el('div', { style: 'color:var(--muted)' }, 'No reviews yet')]));
+  }
+  function closeDrawer() { $('drawer-root').hidden = true; }
+  document.addEventListener('keydown', e => { if (e.key === 'Escape') closeDrawer(); });
+
+  async function review(id, payload) {
+    const r = await fetch('/api/v1/incidents/' + encodeURIComponent(id) + '/review', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ reviewed_by: 'operator', ...payload }) });
+    if (!r.ok) alert('Review failed (' + r.status + ')');
+    await poll(false);
+  }
+
+  // ---------- cross-camera view
+  async function renderSessions() {
+    let sessions = [];
+    try { sessions = (await getJSON('/api/v1/global-person-sessions')).sessions; } catch (_) { }
+    if (!sessions.length) { $('sessions').replaceChildren(el('div', { class: 'empty' }, 'No global person sessions yet')); return; }
+    const hopsByPerson = {};
+    for (const inc of state.incidents) for (const t of inc.timeline || [])
+      (hopsByPerson[inc.global_person_id] ||= []).push(t);
+    const statusColor = { matched: 'var(--ok)', possible_match: 'var(--medium)', ambiguous: 'var(--high)', unknown: 'var(--low)' };
+    sessions.sort((a, b) => new Date(b.last_seen_at_utc) - new Date(a.last_seen_at_utc));
+    $('sessions').replaceChildren(...sessions.map(s => {
+      const hops = (hopsByPerson[s.global_person_id] || []).sort((a, b) => new Date(a.observed_at_utc) - new Date(b.observed_at_utc));
+      const path = hops.length ? hops.map(h => el('div', { class: 'hop' }, h.camera_id, el('small', {}, time(h.observed_at_utc) + ' · ' + label(h.candidate_type))))
+                               : s.associated_cameras.map(c => el('div', { class: 'hop' }, c));
+      const journey = el('div', { class: 'journey' });
+      path.forEach((p, i) => { if (i) journey.append(el('span', { class: 'arrow' }, '→')); journey.append(p); });
+      return el('div', { class: 'person' },
+        el('div', { class: 'person-head' },
+          el('b', { class: 'mono' }, s.global_person_id),
+          s.display_name || s.person_id ? el('span', { class: 'badge', style: 'color:var(--reg)' }, s.display_name || s.person_id)
+                                         : el('span', { class: 'badge', style: 'color:var(--unknown)' }, 'anonymous'),
+          el('span', { class: 'badge', style: 'color:' + statusColor[s.association_status] }, s.association_status.replace('_', ' ')),
+          el('span', { style: 'color:var(--muted);font-size:12.5px' },
+            (s.last_similarity != null ? 'similarity ' + s.last_similarity.toFixed(2) + ' · ' : '') +
+            s.observation_count + ' observations · last seen ' + ago(s.last_seen_at_utc)),
+          el('span', { class: 'badge', style: 'margin-left:auto;color:' + (s.status === 'active' ? 'var(--ok)' : 'var(--low)') }, s.status)),
+        journey);
+    }));
+  }
+
+  // ---------- model card
+  let modelLoaded = false;
+  async function loadModelCard() {
+    if (modelLoaded) return;
+    let mc;
+    try { mc = await getJSON('/static/model_card/model_card.json'); }
+    catch (_) { $('model-card').replaceChildren(el('div', { class: 'empty' }, 'Model card not available')); return; }
+    modelLoaded = true;
+    const table = (head, rows) => el('table', {}, el('thead', {}, el('tr', {}, ...head.map(h => el('th', {}, h)))),
+      el('tbody', {}, ...rows.map(r => el('tr', {}, ...r.map(c => el('td', {}, c))))));
+    const f3 = v => v == null ? '–' : v.toFixed(3);
+    const a = mc.action, f = mc.face, b = mc.benchmark;
+    $('model-card').replaceChildren(el('div', { class: 'mc-grid' },
+      el('div', { class: 'panel' },
+        el('h2', {}, 'Action recognition ', el('span', { class: 'count' }, a.model)),
+        el('div', { class: 'stat-row' }, el('div', {}, el('b', {}, pct(a.accuracy)), 'test accuracy'),
+          el('div', {}, el('b', {}, a.macro_f1.toFixed(3)), 'macro F1'), el('div', {}, el('b', {}, a.classes.reduce((s, c) => s + c.support, 0)), 'test clips')),
+        table(['Class', 'Precision', 'Recall', 'F1', 'Support'], a.classes.map(c => [c.name, f3(c.precision), f3(c.recall), f3(c.f1), c.support])),
+        el('div', { class: 'note' }, a.note),
+        el('h2', { style: 'margin-top:16px' }, 'Class schema selection'),
+        el('div', { class: 'bars' }, ...a.schemas.map(s => el('div', { class: 'row' }, el('span', {}, s.name),
+          el('div', { class: 'track' }, el('div', { class: 'fill', style: `width:${s.val_accuracy * 100}%` })), el('span', { class: 'mono' }, pct(s.val_accuracy)))))),
+      el('div', { class: 'panel' }, el('h2', {}, 'Confusion matrix ', el('span', { class: 'count' }, 'test set')),
+        el('img', { src: '/static/model_card/action_confusion_matrix.png', alt: 'Action classifier confusion matrix' })),
+      el('div', { class: 'panel' },
+        el('h2', {}, 'Face recognition ', el('span', { class: 'count' }, f.model)),
+        el('div', { class: 'stat-row' }, el('div', {}, el('b', {}, pct(f.closed_set_top1)), 'closed-set top-1'),
+          el('div', {}, el('b', {}, f.operating_point.threshold), 'match threshold'),
+          el('div', {}, el('b', {}, pct(f.operating_point.far)), 'FAR'), el('div', {}, el('b', {}, pct(f.operating_point.frr)), 'FRR')),
+        table(['Threshold', 'FAR', 'FRR', ''], f.sweep.map(r => [r.threshold, pct(r.far), pct(r.frr), r.note || ''])),
+        el('div', { class: 'note' }, f.data + '. Cross-camera association: match ≥ ' + f.association_threshold.match + ', possible ≥ ' + f.association_threshold.possible + '.')),
+      el('div', { class: 'panel' }, el('h2', {}, 'Open-set threshold sweep'),
+        el('img', { src: '/static/model_card/face_far_frr.png', alt: 'FAR and FRR versus threshold' })),
+      el('div', { class: 'panel', style: 'grid-column:1/-1' },
+        el('h2', {}, 'Runtime benchmark ', el('span', { class: 'count' }, b.hardware)),
+        table(['Setup', 'FPS / camera', 'VRAM peak (MiB)'], b.rows.map(r => [r.setup, r.fps_per_camera.toFixed(2), r.vram_mib ?? '–'])),
+        el('div', { class: 'note' }, b.note))));
+  }
+
+  // ---------- polling
+  async function poll(schedule = true) {
+    try {
+      const [inc, ev, cams, stats] = await Promise.all([
+        getJSON('/api/v1/incidents'), getJSON('/api/v1/events?limit=50'),
+        getJSON('/api/v1/cameras'), getJSON('/api/v1/stats')]);
+      state.incidents = inc.incidents; state.events = ev.events;
+      const ids = new Set(state.incidents.map(i => i.incident_id));
+      state.fresh = new Set();
+      if (state.seen) {
+        for (const i of state.incidents) if (!state.seen.has(i.incident_id)) {
+          state.fresh.add(i.incident_id);
+          if (i.highest_severity === 'HIGH' || i.highest_severity === 'CRITICAL') { toast(i); beep(); }
+        }
+      }
+      state.seen = ids;
+      renderAlerts(); renderCameras(cams.cameras); renderStats(stats); renderEvents(state.events);
+      if (!$('view-xcam').hidden) renderSessions();
+      $('conn').querySelector('.dot').classList.remove('bad');
+      $('conn-text').textContent = 'Live · ' + new Date().toLocaleTimeString();
+    } catch (e) {
+      $('conn').querySelector('.dot').classList.add('bad');
+      $('conn-text').textContent = 'Disconnected - retrying';
+    }
+    if (schedule) setTimeout(poll, 3000);
+  }
+  poll();
+</script>
+</body>
+</html>

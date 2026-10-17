@@ -1,0 +1,43 @@
+{
+  "updated": "2026-10-18",
+  "action": {
+    "model": "EfficientNet-B0 + GRU (32 frames, 224x224)",
+    "data": "UCF-Crime + YouTube Robbery + SCVD; test set 307 clips",
+    "accuracy": 0.6775,
+    "macro_f1": 0.615,
+    "classes": [
+      {"name": "Normal", "precision": 0.934, "recall": 0.668, "f1": 0.779, "support": 211},
+      {"name": "Property Crime", "precision": 0.388, "recall": 0.646, "f1": 0.484, "support": 48},
+      {"name": "Person Violence", "precision": 0.474, "recall": 0.750, "f1": 0.581, "support": 48}
+    ],
+    "schemas": [
+      {"name": "6 classes", "val_accuracy": 0.5989},
+      {"name": "4 classes", "val_accuracy": 0.6384},
+      {"name": "3 classes (deployed)", "val_accuracy": 0.6967}
+    ],
+    "note": "High recall / lower precision on threat classes; false alarms are reduced by the 2-of-3 temporal rule, thresholds, cooldown and human review."
+  },
+  "face": {
+    "model": "SCRFD det_10g + ArcFace w600k_r50",
+    "data": "Faces-Dataset, open-set: 15 enrolled / 16 unknown identities",
+    "closed_set_top1": 0.9502,
+    "operating_point": {"threshold": 0.275, "far": 0.004, "frr": 0.152},
+    "association_threshold": {"match": 0.30, "possible": 0.225},
+    "sweep": [
+      {"threshold": 0.20, "far": 0.085, "frr": 0.074, "note": "EER"},
+      {"threshold": 0.25, "far": 0.012, "frr": 0.121},
+      {"threshold": 0.275, "far": 0.004, "frr": 0.152, "note": "selected"},
+      {"threshold": 0.55, "far": 0.0, "frr": 0.714, "note": "previous"}
+    ]
+  },
+  "benchmark": {
+    "hardware": "RTX 3050 Laptop 4 GB, 2 x 2560x1440 video, YOLOv8n",
+    "rows": [
+      {"setup": "Legacy: 1 process per camera (det+face+action)", "fps_per_camera": 1.92, "vram_mib": 1879},
+      {"setup": "Shared Gateway (det+face+action)", "fps_per_camera": 1.58, "vram_mib": 2064},
+      {"setup": "Shared Gateway (det+action)", "fps_per_camera": 6.84, "vram_mib": null},
+      {"setup": "Shared Gateway (detection only)", "fps_per_camera": 8.16, "vram_mib": 820}
+    ],
+    "note": "Bottleneck: CPU face inference (GPU util 27%). Next: ONNX CUDA provider, per-track face sampling, batching."
+  }
+}
