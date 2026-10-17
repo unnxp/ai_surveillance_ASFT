@@ -1,0 +1,13 @@
+# These 0.70 thresholds are an uncalibrated legacy baseline, not validated operating points.
+action:
+  sample_hz: 10.0
+  window_frames: 32
+  inference_interval_seconds: 1.5
+  max_sample_gap_seconds: 0.5
+  max_active_tracks: 8
+  max_inferences_per_cycle: 2
+  normal_threshold: 0.70
+  property_threshold: 0.70
+  violence_threshold: 0.70
+  cooldown_seconds: 10.0
+  context_margin: 0.2

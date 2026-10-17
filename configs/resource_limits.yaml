@@ -1,0 +1,9 @@
+resource_limits:
+  vram_budget_mb: 3200
+  yolo_device: 0
+  yolo_half: true
+  face_device: "cpu"
+  action_device: 0
+  action_inference_interval_sec: 1.5
+  max_concurrent_action_infer: 2
+  max_fps_per_camera: 30

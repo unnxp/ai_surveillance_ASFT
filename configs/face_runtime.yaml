@@ -1,0 +1,13 @@
+face_runtime:
+  model_version: scrfd-det10g_arcface-w600k-r50_v1
+  min_detection_score: 0.7
+  min_face_size: 40
+  min_sharpness: 30.0
+  sample_every_frames: 5
+  max_samples_per_track: 3
+  max_tracks_per_frame: 2
+
+# Read by Central (server/database.py). Chosen from an open-set sweep on Faces-Dataset:
+# 0.275 -> FAR 0.4%, FRR 15.2%; the earlier 0.55 gave FRR 71.4%.
+face_matching:
+  match_threshold: 0.275

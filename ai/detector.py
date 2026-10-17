@@ -13,67 +13,68 @@ DETECT_CLASS_NAMES = {
 
 
 class PersonDetector:
+    """
+    1 instance = 1 กล้อง = 1 tracker state แยกกันสมบูรณ์
+
+    tracker_mode:
+      "bytetrack" → เร็ว ใช้ motion only (อาจ ID สลับถ้าคนเดินสวน)
+      "botsort"   → ช้ากว่านิดนึง ใช้ appearance+motion (แยกคนได้ดีกว่า)
+    """
+
+    TRACKER_MAP = {
+        "bytetrack": "bytetrack.yaml",
+        "botsort":   "botsort.yaml",
+    }
+
     def __init__(
         self,
         model_path: str = "yolov8n.pt",
         conf: float = 0.5,
         imgsz: int = 640,
         device: int | str = 0,
-        skip_frames: int = 2,
         half: bool = True,
+        name: str = "Detector",
+        tracker_mode: str = "botsort",    # ✅ เปลี่ยนตรงนี้
     ):
         self.model = YOLO(model_path)
         self.conf = conf
         self.imgsz = imgsz
         self.device = device
-        self.skip_frames = skip_frames
         self.half = half
+        self.name = name
 
-        self._frame_count = 0
-        self._last_results = None
-        self._last_batch_size = 0   # ✅ จำ batch size ล่าสุดไว้เปรียบเทียบ
+        if tracker_mode not in self.TRACKER_MAP:
+            raise ValueError(f"tracker_mode ต้องเป็น {list(self.TRACKER_MAP.keys())}")
 
-    # ────────────────────────────────────────────
-    def detect_batch(self, frames: list):
+        self._tracker_cfg = self.TRACKER_MAP[tracker_mode]
+        print(f"[{self.name}] Model: {model_path} | Tracker: {tracker_mode}")
+
+    # ══════════════════════════════════════════════
+    #  TRACK  (single frame)
+    # ══════════════════════════════════════════════
+    def track(self, frame):
         """
-        Batch Inference: ส่ง N frames เข้า GPU ใน 1 call
-        ✅ Fix: ถ้า batch size เปลี่ยน (เช่น cam2 เพิ่งเปิด/ปิด)
-                → บังคับ infer ใหม่ทันที ไม่ใช้ cache เดิม
+        Track single frame พร้อม persist tracker state
         """
-        if not frames:
-            return []
+        if frame is None:
+            return None
 
-        self._frame_count += 1
-        should_infer = (self._frame_count % self.skip_frames == 0)
-
-        # ✅ KEY FIX: batch size เปลี่ยน → ต้อง infer ใหม่เสมอ
-        batch_size_changed = (len(frames) != self._last_batch_size)
-        if batch_size_changed:
-            should_infer = True
-            self._frame_count = 0   # reset counter ให้ skip นับใหม่
-
-        if should_infer or self._last_results is None:
-            results = self.model(
-                frames,
-                conf=self.conf,
-                classes=DETECT_CLASSES,
-                device=self.device,
-                imgsz=self.imgsz,
-                half=self.half,
-                verbose=False,
-            )
-            self._last_results = results
-            self._last_batch_size = len(frames)   # ✅ อัปเดต batch size
-
-        return self._last_results
-
-    # ────────────────────────────────────────────
-    def detect(self, frame):
-        """Single frame detect"""
-        results = self.detect_batch([frame])
+        results = self.model.track(
+            frame,
+            conf=self.conf,
+            classes=DETECT_CLASSES,
+            device=self.device,
+            imgsz=self.imgsz,
+            half=self.half,
+            verbose=False,
+            persist=True,
+            tracker=self._tracker_cfg,
+        )
         return results[0]
 
-    # ────────────────────────────────────────────
+    # ══════════════════════════════════════════════
+    #  HELPERS
+    # ══════════════════════════════════════════════
     def has_person(self, result) -> bool:
         if result is None or result.boxes is None:
             return False
@@ -86,8 +87,3 @@ class PersonDetector:
             DETECT_CLASS_NAMES.get(int(c), str(int(c)))
             for c in result.boxes.cls.tolist()
         ]
-
-    def reset(self):
-        self._frame_count = 0
-        self._last_results = None
-        self._last_batch_size = 0

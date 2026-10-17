@@ -1,24 +1,27 @@
 import cv2
 import time
+import threading
 import numpy as np
 
 from cameras.camera import Camera
 from ai.detector import PersonDetector
-from clients.pir_client import PIRClient
-import threading
+from ai.tracker import TrajectoryManager
+from ai.face_recognition import FaceRecognitionManager
+from ai.action_classifier import ActionClassifierManager
+from logic.risk_assessment import RiskAssessmentEngine
 
 # ════════════════════════════════════════════════
 #  CONFIG
 # ════════════════════════════════════════════════
-TARGET_FPS         = 30
-FRAME_TIME         = 1.0 / TARGET_FPS
-DISPLAY_WIDTH      = 640
-YOLO_INPUT_SIZE    = 640        # ลองเป็น 416 ถ้าอยาก FPS สูงขึ้น
-SKIP_FRAMES        = 2          # ลองเป็น 3 ถ้า GPU ยัง load สูง
-CONF_THRESHOLD     = 0.5
-PRE_RESIZE_WIDTH   = 960        # ✅ resize ก่อนส่ง YOLO (ช่วย 4K มาก)
-CAM2_HOLD_DURATION = 3.0
-PIR_POLL_INTERVAL  = 0.5
+TARGET_FPS          = 30
+FRAME_TIME          = 1.0 / TARGET_FPS
+DISPLAY_WIDTH       = 640
+YOLO_INPUT_SIZE     = 640
+CONF_THRESHOLD      = 0.35
+PRE_RESIZE_WIDTH    = 960
+TRAJ_MAX_HISTORY    = 60
+TRAJ_MAX_AGE        = 5.0
+PREDICT_STEPS       = 20
 
 # ════════════════════════════════════════════════
 #  UTILS
@@ -37,177 +40,124 @@ def resize_keep_ratio(frame, target_width):
 
 
 def pre_resize(frame, max_width=PRE_RESIZE_WIDTH):
-    """
-    ✅ Resize ก่อนส่ง YOLO
-    ลด memory bandwidth โดยเฉพาะวิดีโอ 4K
-    """
     h, w = frame.shape[:2]
     if w > max_width:
         return resize_keep_ratio(frame, max_width)
     return frame
 
 
-def draw_label(frame, text, color, pos=(20, 40)):
-    cv2.putText(frame, text, pos, cv2.FONT_HERSHEY_SIMPLEX, 1.0, color, 3)
+def draw_label(frame, text, color=(0, 255, 0), pos=(20, 40)):
+    cv2.putText(frame, text, pos, cv2.FONT_HERSHEY_SIMPLEX,
+                1.0, color, 3, cv2.LINE_AA)
 
 
-def draw_fps(frame, fps, pos=(20, 75)):
-    cv2.putText(frame, f"FPS: {fps:.1f}", pos,
-                cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 0), 2)
-
-
-# ════════════════════════════════════════════════
-#  PIR POLLER (background thread)
-# ════════════════════════════════════════════════
-class PIRPoller:
-    def __init__(self, client: PIRClient, interval: float = 0.5):
-        self._client = client
-        self._interval = interval
-        self._active = False
-        self._lock = threading.Lock()
-        self._thread = threading.Thread(
-            target=self._loop, daemon=True, name="Thread-PIR"
-        )
-
-    def start(self):
-        self._thread.start()
-        return self
-
-    def _loop(self):
-        while True:
-            try:
-                state = self._client.is_active()
-            except Exception:
-                state = False
-            with self._lock:
-                self._active = state
-            time.sleep(self._interval)
-
-    @property
-    def is_active(self) -> bool:
-        with self._lock:
-            return self._active
+def draw_fps(frame, fps, active_tracks=0):
+    cv2.putText(frame, f"FPS: {fps:.1f}", (20, 75),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.65, (255, 255, 0), 2)
+    cv2.putText(frame, f"Tracks: {active_tracks}", (20, 105),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.65, (0, 255, 255), 2)
 
 
 # ════════════════════════════════════════════════
-#  INIT
+#  INIT (EDGE NODE 1 - CAMERA 1 PURE EXPORTER)
 # ════════════════════════════════════════════════
-detector = PersonDetector(
+
+detector_cam1 = PersonDetector(
     conf=CONF_THRESHOLD,
     imgsz=YOLO_INPUT_SIZE,
-    skip_frames=SKIP_FRAMES,
     device=0,
-    half=True,              # ✅ FP16
+    half=True,
+    name="Detector-Cam1",
 )
 
 cam1 = Camera(
-    "videos/3105196-uhd_3840_2160_30fps.mp4",
+    "videos/3105196-uhd_3840_2160_30fps.mp4", # ✅ เก็บไว้สำหรับเปลี่ยนกลับมาทดสอบ
+    # "rtsp://admin:<PASSWORD>@192.168.137.17:554/stream1",
     name="Camera 1 (Always ON)"
 ).start()
 
-cam2 = Camera(
-    r"C:\Users\M S I\Desktop\project_main\ai_surveillance\videos\test_for_cam2.mp4",
-    name="Camera 2 (PIR + Self Hold)",
-).start()
+# ✅ เริ่มต้นระบบการประมวลผลสกัดฟีเจอร์และระบุตัวตนฝั่ง Edge Node
+face_manager = FaceRecognitionManager()
+action_manager = ActionClassifierManager()
+risk_engine = RiskAssessmentEngine()
 
-pir_poller = PIRPoller(
-    PIRClient("http://127.0.0.1:8000"),
-    interval=PIR_POLL_INTERVAL
-).start()
-
-# ---- cam2 state ----
-cam2_open = False
-last_person_time = 0.0
-
-# ---- FPS ----
 fps_counter = 0
 fps_display = 0.0
 fps_timer = time.time()
 
 # ════════════════════════════════════════════════
-#  MAIN LOOP
+#  MAIN LOOP (CAMERA 1 - EDGE FEATURE EXPORTER)
 # ════════════════════════════════════════════════
 while True:
     loop_start = time.time()
     now = loop_start
 
-    # ── FPS ──────────────────────────
+    # ── FPS ──────────────────────────────────────
     fps_counter += 1
     if now - fps_timer >= 1.0:
         fps_display = fps_counter / (now - fps_timer)
         fps_counter = 0
         fps_timer = now
 
-    # ── Read frames ──────────────────
+    # ── Read frame ──────────────────────────────
     ret1, frame1 = cam1.read()
-    ret2, frame2 = cam2.read()
 
-    # ── PIR state ────────────────────
-    if pir_poller.is_active:
-        cam2_open = True
-
-    # ════════════════════════════════════════
-    # ✅ BATCH INFERENCE (2 frames → 1 GPU call)
-    # ════════════════════════════════════════
-    batch_frames = []
-    batch_index = {}     # map: {'cam1': 0, 'cam2': 1}
-
+    # ════════ Camera 1 (Always ON) ════════════════
     if ret1 and frame1 is not None:
-        batch_frames.append(pre_resize(frame1))
-        batch_index['cam1'] = len(batch_frames) - 1
+        pre1 = pre_resize(frame1)
+        scale_cam1 = DISPLAY_WIDTH / pre1.shape[1]
 
-    if ret2 and frame2 is not None and cam2_open:
-        batch_frames.append(pre_resize(frame2))
-        batch_index['cam2'] = len(batch_frames) - 1
-
-    # รัน inference ครั้งเดียวสำหรับทุก frame
-    batch_results = detector.detect_batch(batch_frames) if batch_frames else []
-
-    # ════════ Camera 1 ════════
-    if ret1 and 'cam1' in batch_index:
-        result1 = batch_results[batch_index['cam1']]
+        # ✅ detector_cam1 มี tracker state ของตัวเอง
+        result1 = detector_cam1.track(pre1)
         view1 = resize_keep_ratio(result1.plot(), DISPLAY_WIDTH)
+        
+        active_tracks1 = len(result1.boxes.id) if (result1 is not None and result1.boxes is not None and result1.boxes.id is not None) else 0
+
+        # ✅ สกัดฟีเจอร์ Geofence, ใบหน้า และจำแนกพฤติกรรม
+        h1, w1 = view1.shape[:2]
+        risk_states1 = risk_engine.update_and_assess(
+            cam1.name, result1, scale=scale_cam1, frame_w=w1, frame_h=h1, current_time=now,
+            face_manager=face_manager, action_manager=action_manager, raw_frame=pre1, check_interval=1.0
+        )
+        
+        # ✅ แสดงผลแผนภาพความร้อนสะสมและ Geofence
+        view1 = risk_engine.heatmap_manager.apply_overlay(cam1.name, view1, risk_engine.is_off_hours())
+        
+        risk_engine.draw_geofence(view1, cam1.name)
+        risk_engine.draw_risk_overlay(view1, result1, scale_cam1, risk_states1)
+
         draw_label(view1, "ACTIVE", (0, 255, 0))
+        draw_fps(view1, fps_display, active_tracks1)
+        
+        # แสดงสถานะโหมด Heatmap
+        hm_mode = risk_engine.heatmap_manager.get_display_mode_str()
+        if hm_mode != "OFF":
+            cv2.putText(view1, f"HEATMAP: {hm_mode}", (20, 135),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 165, 255), 2)
+
     else:
         view1 = blank_frame(text="CAMERA 1 OFFLINE")
 
-    draw_fps(view1, fps_display)
     cv2.imshow(cam1.name, view1)
 
-    # ════════ Camera 2 ════════
-    if not ret2 or frame2 is None:
-        view2 = blank_frame(text="CAMERA 2 OFFLINE")
-
-    elif cam2_open and 'cam2' in batch_index:
-        result2 = batch_results[batch_index['cam2']]
-        person_detected = detector.has_person(result2)
-
-        if person_detected:
-            last_person_time = now
-
-        if now - last_person_time <= CAM2_HOLD_DURATION:
-            view2 = resize_keep_ratio(result2.plot(), DISPLAY_WIDTH)
-            draw_label(view2, "ACTIVE", (0, 255, 0))
-        else:
-            cam2_open = False
-            view2 = resize_keep_ratio(frame2, DISPLAY_WIDTH)
-            draw_label(view2, "STANDBY", (0, 165, 255))
-    else:
-        view2 = resize_keep_ratio(frame2, DISPLAY_WIDTH)
-        draw_label(view2, "STANDBY", (0, 165, 255))
-
-    draw_fps(view2, fps_display)
-    cv2.imshow(cam2.name, view2)
-
-    # ════════ EXIT ════════
+    # ════════ EXIT / KEYBOARD EVENTS ══════════════
     elapsed = time.time() - loop_start
     wait_ms = max(1, int((FRAME_TIME - elapsed) * 1000))
-    if cv2.waitKey(wait_ms) & 0xFF == ord('q'):
+    key = cv2.waitKey(wait_ms) & 0xFF
+    if key == ord('q'):
         break
+    elif key == ord('h'):
+        new_mode = risk_engine.heatmap_manager.toggle_mode()
+        print(f"[UI] Heatmap mode toggled to: {new_mode}")
+    elif key == ord('j'):
+        json_packet_str = risk_engine.export_edge_packet(cam1.name, current_time=now, to_json=True, indent=2)
+        print("\n==================== [EDGE JSON PACKET - CAM 1] ====================")
+        print(json_packet_str)
+        print("============================================================\n")
+
 
 # ════════════════════════════════════════════════
 #  CLEANUP
 # ════════════════════════════════════════════════
 cam1.release()
-cam2.release()
 cv2.destroyAllWindows()

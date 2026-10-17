@@ -1,0 +1,21 @@
+# ByteTrack custom config สำหรับ AI Surveillance
+
+tracker_type: bytetrack
+
+# ✅ ต่ำกว่า YOLO conf (0.5) → detections ทุกตัวเข้า high-conf pool
+track_high_thresh: 0.45
+
+# low-conf pool
+track_low_thresh: 0.1
+
+# สร้าง track ใหม่ได้ง่ายขึ้น
+new_track_thresh: 0.45
+
+# จำ track ที่หายไปได้นานกี่ frame (30fps × 1s)
+track_buffer: 10
+
+# IoU matching threshold
+match_thresh: 0.85
+
+# ✅ field ที่ ultralytics version ใหม่ต้องการ (ขาดไป → crash)
+fuse_score: True

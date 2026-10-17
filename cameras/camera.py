@@ -1,7 +1,10 @@
 import cv2
 import time
 import threading
+import os
 from collections import deque
+
+os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = "rtsp_transport;tcp"
 
 
 class Camera:
